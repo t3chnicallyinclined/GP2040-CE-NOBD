@@ -260,19 +260,66 @@ void GP2040::debounceGpioGetAll() {
 		return;
 	}
 
-	uint32_t now = getMillis();
-	// check each button use case GPIO for state
-	for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++) {
-		Mask_t pin_mask = 1 << pin;
-		if (buttonGpios & pin_mask) {
-			// Allow debouncer to change state if button state changed and debounce delay threshold met
-			if ((gamepad->debouncedGpio & pin_mask) != \
-					(raw_gpio & pin_mask) && ((now - gpioDebounceTime[pin]) > debounceDelay)) {
-				gamepad->debouncedGpio ^= pin_mask;
-				gpioDebounceTime[pin] = now;
-			}
-		}
-	}
+    // read sync window (ms) from UI slider
+    uint32_t syncWindowMs = Storage::getInstance()
+                                .getGamepadOptions()
+                                .debounceDelay;
+
+    // slider = 0: raw passthrough, no sync
+    if (syncWindowMs == 0) {
+        gamepad->debouncedGpio = raw;
+        return;
+    }
+
+    // Directional inputs bypass the sync window entirely (no buffering delay).
+    // Only attack buttons benefit from simultaneous press grouping.
+    //
+    // NOTE: Only primary DPAD pins are bypassed here. The secondary
+    // DIGITAL_DIRECTION_* pins (used by DualDirectional addon) still go
+    // through the sync window. If DDI users report direction-vs-button
+    // desync, add mapDigitalUp/Down/Left/Right pinMasks here too.
+    Mask_t dpadPins = gamepad->mapDpadUp->pinMask |
+                      gamepad->mapDpadDown->pinMask |
+                      gamepad->mapDpadLeft->pinMask |
+                      gamepad->mapDpadRight->pinMask;
+    Mask_t buttonRaw = raw & ~dpadPins;
+
+    // Pass directions straight through
+    gamepad->debouncedGpio = (gamepad->debouncedGpio & ~dpadPins) | (raw & dpadPins);
+
+    static bool     sync_pending = false;
+    static uint32_t sync_start   = 0;
+    static Mask_t   sync_new     = 0;
+
+    Mask_t prev          = gamepad->debouncedGpio;
+    Mask_t just_pressed  = buttonRaw & ~prev & ~sync_new;  // truly new 0->1
+    Mask_t just_released = prev & ~raw;                     // committed bits going 1->0
+
+    // 1) releases always apply immediately (critical for charge moves)
+    if (just_released) {
+        gamepad->debouncedGpio &= ~just_released;
+    }
+
+    // 2) drop any pending presses whose button was released before commit
+    sync_new &= buttonRaw;
+
+    // 3) accumulate new presses into the sync window
+    if (just_pressed) {
+        if (!sync_pending) {
+            sync_pending = true;
+            sync_start   = now;
+            sync_new     = just_pressed;
+        } else {
+            sync_new |= just_pressed;
+        }
+    }
+
+    // 4) commit all buffered presses when window expires
+    if (sync_pending && (now - sync_start) >= syncWindowMs) {
+        gamepad->debouncedGpio |= sync_new;
+        sync_pending = false;
+        sync_new     = 0;
+    }
 }
 
 void GP2040::run() {
