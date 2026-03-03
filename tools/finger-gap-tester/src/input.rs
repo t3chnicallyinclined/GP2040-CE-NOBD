@@ -1,5 +1,5 @@
 use gilrs::{Button, EventType, GamepadId, Gilrs};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 const PAIR_WINDOW_MS: f64 = 50.0;
 
@@ -19,7 +19,10 @@ struct PendingPress {
     button: Button,
     #[allow(dead_code)]
     gamepad_id: GamepadId,
-    timestamp: Instant,
+    /// OS-level timestamp from gilrs event — accurate sub-ms gap measurement.
+    event_time: SystemTime,
+    /// Wall clock for expiry check only.
+    wall_time: Instant,
 }
 
 pub struct GamepadInput {
@@ -45,19 +48,24 @@ impl GamepadInput {
             match event.event {
                 EventType::ButtonPressed(button, _) => {
                     events.push(InputEvent::Pressed(button));
-                    let now = Instant::now();
 
                     match self.pending.take() {
                         None => {
                             self.pending = Some(PendingPress {
                                 button,
                                 gamepad_id: event.id,
-                                timestamp: now,
+                                event_time: event.time,
+                                wall_time: Instant::now(),
                             });
                         }
                         Some(pending) => {
-                            let gap_ms =
-                                pending.timestamp.elapsed().as_secs_f64() * 1000.0;
+                            // Use OS-level event timestamps for accurate gap
+                            let gap_ms = event
+                                .time
+                                .duration_since(pending.event_time)
+                                .unwrap_or_default()
+                                .as_secs_f64()
+                                * 1000.0;
 
                             if gap_ms <= PAIR_WINDOW_MS {
                                 pair = Some(ButtonPair {
@@ -69,7 +77,8 @@ impl GamepadInput {
                                 self.pending = Some(PendingPress {
                                     button,
                                     gamepad_id: event.id,
-                                    timestamp: now,
+                                    event_time: event.time,
+                                    wall_time: Instant::now(),
                                 });
                             }
                         }
@@ -84,7 +93,7 @@ impl GamepadInput {
 
         // Expire stale pending press
         if let Some(ref pending) = self.pending {
-            if pending.timestamp.elapsed().as_secs_f64() * 1000.0 > PAIR_WINDOW_MS {
+            if pending.wall_time.elapsed().as_secs_f64() * 1000.0 > PAIR_WINDOW_MS {
                 self.pending = None;
             }
         }
