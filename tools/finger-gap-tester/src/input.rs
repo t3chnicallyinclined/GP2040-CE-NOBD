@@ -1,7 +1,12 @@
-use gilrs::{Button, EventType, GamepadId, Gilrs};
-use std::time::Instant;
+use gilrs::{Button, EventType, Gilrs};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const PAIR_WINDOW_MS: f64 = 50.0;
+/// Poll gilrs every 0.125ms (~8kHz) — fast enough to separate events
+/// across different USB frames (1ms apart) while keeping CPU usage low.
+const POLL_INTERVAL: Duration = Duration::from_micros(125);
 
 pub struct ButtonPair {
     pub button_a: Button,
@@ -15,52 +20,121 @@ pub enum InputEvent {
     Released(Button),
 }
 
+enum InputMsg {
+    Pressed(Button, Instant),
+    Released(Button),
+    GamepadName(Option<String>),
+}
+
 struct PendingPress {
     button: Button,
-    #[allow(dead_code)]
-    gamepad_id: GamepadId,
     timestamp: Instant,
 }
 
 pub struct GamepadInput {
-    gilrs: Gilrs,
+    rx: Receiver<InputMsg>,
     pending: Option<PendingPress>,
+    gamepad_name: Option<String>,
 }
 
 impl GamepadInput {
-    pub fn new() -> Result<Self, gilrs::Error> {
-        let gilrs = Gilrs::new()?;
-        Ok(Self {
-            gilrs,
-            pending: None,
-        })
+    pub fn new() -> Result<Self, String> {
+        let (init_tx, init_rx) = mpsc::sync_channel(1);
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut gilrs = match Gilrs::new() {
+                Ok(g) => {
+                    let _ = init_tx.send(Ok(()));
+                    g
+                }
+                Err(e) => {
+                    let _ = init_tx.send(Err(e.to_string()));
+                    return;
+                }
+            };
+
+            // Force immediate gamepad name check on first iteration
+            let mut last_name_check = Instant::now() - Duration::from_secs(10);
+
+            loop {
+                // Periodically send gamepad connection status
+                if last_name_check.elapsed() >= Duration::from_secs(1) {
+                    let name = gilrs
+                        .gamepads()
+                        .next()
+                        .map(|(_, gp)| gp.name().to_string());
+                    if tx.send(InputMsg::GamepadName(name)).is_err() {
+                        return; // UI thread dropped, exit
+                    }
+                    last_name_check = Instant::now();
+                }
+
+                // Process events — only ONE ButtonPressed per cycle.
+                // When gilrs (XInput) detects two state changes in one poll,
+                // it buffers both events. By taking only one press and sleeping,
+                // the second press gets its own timestamp on the next cycle.
+                // Events from different USB frames naturally get different
+                // timestamps because gilrs re-polls the OS when the buffer
+                // is empty.
+                loop {
+                    match gilrs.next_event() {
+                        Some(event) => match event.event {
+                            EventType::ButtonPressed(button, _) => {
+                                if tx
+                                    .send(InputMsg::Pressed(button, Instant::now()))
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                                break; // One press per cycle
+                            }
+                            EventType::ButtonReleased(button, _) => {
+                                if tx.send(InputMsg::Released(button)).is_err() {
+                                    return;
+                                }
+                            }
+                            _ => {}
+                        },
+                        None => break, // No more events
+                    }
+                }
+
+                thread::sleep(POLL_INTERVAL);
+            }
+        });
+
+        // Wait for init result from thread
+        match init_rx.recv() {
+            Ok(Ok(())) => Ok(Self {
+                rx,
+                pending: None,
+                gamepad_name: None,
+            }),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err("Input thread died during init".to_string()),
+        }
     }
 
-    /// Poll gilrs events. Processes only ONE ButtonPressed per call so that
-    /// consecutive presses are naturally spaced across frames (~1ms apart via
-    /// request_repaint_after). This gives real wall-clock timing between presses
-    /// instead of draining the whole batch in nanoseconds.
+    /// Receive timestamped events from the input thread and detect pairs.
     pub fn poll(&mut self) -> (Option<ButtonPair>, Vec<InputEvent>) {
         let mut pair = None;
         let mut events = Vec::new();
 
-        while let Some(event) = self.gilrs.next_event() {
-            match event.event {
-                EventType::ButtonPressed(button, _) => {
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                InputMsg::Pressed(button, timestamp) => {
                     events.push(InputEvent::Pressed(button));
-                    let now = Instant::now();
 
                     match self.pending.take() {
                         None => {
-                            self.pending = Some(PendingPress {
-                                button,
-                                gamepad_id: event.id,
-                                timestamp: now,
-                            });
+                            self.pending = Some(PendingPress { button, timestamp });
                         }
                         Some(pending) => {
-                            let gap_ms =
-                                pending.timestamp.elapsed().as_secs_f64() * 1000.0;
+                            let gap_ms = timestamp
+                                .duration_since(pending.timestamp)
+                                .as_secs_f64()
+                                * 1000.0;
 
                             if gap_ms <= PAIR_WINDOW_MS {
                                 pair = Some(ButtonPair {
@@ -69,22 +143,17 @@ impl GamepadInput {
                                     gap_ms,
                                 });
                             } else {
-                                self.pending = Some(PendingPress {
-                                    button,
-                                    gamepad_id: event.id,
-                                    timestamp: now,
-                                });
+                                self.pending = Some(PendingPress { button, timestamp });
                             }
                         }
                     }
-                    // Stop after one press — remaining events stay in gilrs
-                    // buffer and get consumed next frame for accurate timing.
-                    break;
                 }
-                EventType::ButtonReleased(button, _) => {
+                InputMsg::Released(button) => {
                     events.push(InputEvent::Released(button));
                 }
-                _ => {}
+                InputMsg::GamepadName(name) => {
+                    self.gamepad_name = name;
+                }
             }
         }
 
@@ -99,15 +168,7 @@ impl GamepadInput {
     }
 
     pub fn connected_gamepad_name(&self) -> Option<String> {
-        self.gilrs
-            .gamepads()
-            .next()
-            .map(|(_, gp)| gp.name().to_string())
-    }
-
-    #[allow(dead_code)]
-    pub fn is_connected(&self) -> bool {
-        self.gilrs.gamepads().next().is_some()
+        self.gamepad_name.clone()
     }
 }
 
