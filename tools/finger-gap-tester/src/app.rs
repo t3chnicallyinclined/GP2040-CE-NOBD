@@ -161,7 +161,6 @@ fn draw_gap_tester(ctx: &egui::Context, stats: &GapStats, log: &[GapLogEntry]) {
                             entry.running_avg,
                         ));
                     }
-                    ui.scroll_to_cursor(Some(egui::Align::TOP));
                 });
         });
 
@@ -315,7 +314,6 @@ fn draw_button_monitor(ctx: &egui::Context, monitor: &ButtonMonitor) {
                             );
                         });
                     }
-                    ui.scroll_to_cursor(Some(egui::Align::TOP));
                 });
         });
 
