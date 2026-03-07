@@ -277,15 +277,16 @@ void GP2040::debounceGpioGetAll() {
 	// Early return if nothing to process (skip if sync window is active)
 	if (!sync_pending && gamepad->debouncedGpio == (raw_gpio & buttonGpios)) return;
 
+	Mask_t raw_buttons   = raw_gpio & buttonGpios;
 	Mask_t prev          = gamepad->debouncedGpio;
-	Mask_t just_pressed  = raw_gpio & ~prev & ~sync_new;
-	Mask_t just_released = prev & ~raw_gpio;
+	Mask_t just_pressed  = raw_buttons & ~prev & ~sync_new;
+	Mask_t just_released = prev & ~raw_buttons;
 
 	// 1) Releases always instant
 	if (just_released) gamepad->debouncedGpio &= ~just_released;
 
 	// 2) Drop pending presses released before commit
-	sync_new &= raw_gpio;
+	sync_new &= raw_buttons;
 
 	// 3) All new presses enter the sync window
 	if (just_pressed) {

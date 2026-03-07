@@ -52,7 +52,7 @@ message("GIT_REPO_BUILD_ID is ${GIT_REPO_BUILD_ID}")
 # Uncomment the next line for an unomptimized build for debugging. Use in conjunction with the Debug build type.
 # set(PICO_DEOPTIMIZED_DEBUG 1)
 
-project(GP2040-CE LANGUAGES C CXX ASM VERSION ${CMAKE_GIT_REPO_VERSION})
+project(GP2040-CE-NOBD LANGUAGES C CXX ASM VERSION ${CMAKE_GIT_REPO_VERSION})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -280,8 +280,8 @@ ${PROTO_OUTPUT_DIR}/config.pb.c
 
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_${CMAKE_PROJECT_VERSION}_${GP2040_BOARDCONFIG})
 
-pico_set_program_name(GP2040-CE "GP2040-CE")
-pico_set_program_version(GP2040-CE ${GIT_REPO_VERSION})
+pico_set_program_name(${PROJECT_NAME} "GP2040-CE-NOBD")
+pico_set_program_version(${PROJECT_NAME} ${GIT_REPO_VERSION})
 
 target_link_libraries(${PROJECT_NAME}
 pico_stdlib
