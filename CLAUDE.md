@@ -55,15 +55,18 @@ if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
 
 ```
 1. New press detected (raw_gpio bit goes 0→1)
-2. If no window open: start window, record press in sync_new bitmask
-3. If window already open: accumulate press into sync_new
-4. Every cycle: sync_new &= raw_buttons (drop any released press = bounce filtering)
-5. INSTANT FIRE: if 2+ attack buttons in sync_new → commit immediately
-6. Otherwise when (now_us - sync_start_us) >= syncDelay_us → commit sync_new
-7. Releases ALWAYS apply immediately (debouncedGpio &= ~just_released)
+2. Release-bounce lockout: if this pin was released within syncDelay, ignore it (bounce)
+3. If no window open: start window, record press in sync_new bitmask
+4. If window already open: accumulate press into sync_new
+5. Every cycle: sync_new &= raw_buttons (drop any released press = bounce filtering)
+6. INSTANT FIRE: if 2+ attack buttons in sync_new → commit immediately
+7. Otherwise when (now_us - sync_start_us) >= syncDelay_us → commit sync_new
+8. Releases ALWAYS apply immediately (debouncedGpio &= ~just_released) + record timestamp
 ```
 
-**Why no separate debounce needed:** The continuous validation in step 4 filters bounce more robustly than stock debounce's simple timer. By window expiry (3-5ms), switches have settled (bounce is 1-3ms).
+**Two-layer bounce filtering:**
+- **In-window filter** (step 5): `sync_new &= raw_buttons` clears presses that flicker OFF during the window
+- **Release-bounce lockout** (step 2): per-pin `lastRelease_us[]` timestamps prevent re-presses within syncDelay of release — catches bounces where the switch stays ON through the full window (e.g., 3-5ms off-time bounces that would otherwise pass through as stray jabs)
 
 ---
 

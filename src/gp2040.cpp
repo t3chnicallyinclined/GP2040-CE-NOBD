@@ -284,6 +284,10 @@ void GP2040::debounceGpioGetAll() {
  * this INSTEAD of debounceGpioGetAll(). Reads raw GPIO directly and writes debouncedGpio.
  * Includes built-in bounce filtering (sync_new &= raw_buttons drops momentary releases).
  * Releases are always instant. nobdSyncDelay == 0 means this function is never called.
+ *
+ * Release-bounce lockout: after a button is released, re-presses of that same button
+ * within syncDelay are ignored. This prevents switch bounce on release from creating
+ * ghost single-button presses (stray jabs) during rapid wavedashing.
  */
 void GP2040::syncGpioGetAll() {
 	Mask_t raw_gpio = ~gpio_get_all();
@@ -294,6 +298,7 @@ void GP2040::syncGpioGetAll() {
 	static bool     sync_pending   = false;
 	static uint64_t sync_start_us  = 0;
 	static Mask_t   sync_new       = 0;
+	static uint64_t lastRelease_us[NUM_BANK0_GPIOS] = {0};
 
 	uint64_t now_us = to_us_since_boot(get_absolute_time());
 	uint64_t syncDelay_us = (uint64_t)nobdSyncDelay * 1000;
@@ -306,13 +311,30 @@ void GP2040::syncGpioGetAll() {
 	Mask_t just_pressed  = raw_buttons & ~prev & ~sync_new;
 	Mask_t just_released = prev & ~raw_buttons;
 
-	// 1) Releases always instant
-	if (just_released) gamepad->debouncedGpio &= ~just_released;
+	// 1) Releases always instant — record per-pin release timestamps
+	if (just_released) {
+		gamepad->debouncedGpio &= ~just_released;
+		for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++) {
+			if (just_released & (1 << pin)) {
+				lastRelease_us[pin] = now_us;
+			}
+		}
+	}
 
-	// 2) Drop pending presses released before commit (bounce filtering)
+	// 2) Release-bounce lockout: ignore re-presses within syncDelay of release
+	if (just_pressed) {
+		for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++) {
+			if ((just_pressed & (1 << pin)) && lastRelease_us[pin] &&
+			    (now_us - lastRelease_us[pin]) < syncDelay_us) {
+				just_pressed &= ~(1 << pin);
+			}
+		}
+	}
+
+	// 3) Drop pending presses released before commit (bounce filtering)
 	sync_new &= raw_buttons;
 
-	// 3) All new presses enter the sync window
+	// 4) All new presses enter the sync window
 	if (just_pressed) {
 		if (!sync_pending) {
 			sync_pending  = true;
@@ -323,7 +345,7 @@ void GP2040::syncGpioGetAll() {
 		}
 	}
 
-	// 4) Commit: instant fire if 2+ attack buttons, otherwise wait for window expiry
+	// 5) Commit: instant fire if 2+ attack buttons, otherwise wait for window expiry
 	if (sync_pending) {
 		Mask_t attacks = sync_new & attackButtonGpios;
 		bool instant_fire = attacks & (attacks - 1); // true when 2+ bits set
