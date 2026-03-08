@@ -20,10 +20,7 @@ For anything not NOBD-specific (pin mapping, addons, SOCD, display, USB modes, e
   - Reads raw GPIO directly, writes `gamepad->debouncedGpio`
   - Releases are always instant (never delayed)
   - Built-in bounce filtering via `sync_new &= raw_buttons` every cycle
-  - **Instant fire:** if 2+ attack buttons accumulate in the window, commit everything immediately
-    - Uses `attacks & (attacks - 1)` bit trick (true when 2+ bits set, single cycle on Cortex-M0+)
-    - `attackButtonGpios` mask = B1-B4, L1-L2, R1-R2 (cached in `setup()` ~line 90)
-    - Commits ALL pending inputs (buttons + directions), not just the attack buttons
+  - All presses wait the full sync window before committing (no instant fire)
 
 - **`debounceGpioGetAll()`** (~line 251) — stock GP2040-CE per-pin debounce (unchanged)
 
@@ -47,7 +44,7 @@ if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
 | Translations | `www/src/Locales/en/SettingsPage.jsx` | Labels for input timing mode controls |
 
 ### Header
-- **`headers/gp2040.h`** — declares `syncGpioGetAll()`, `attackButtonGpios`, and sync-related members
+- **`headers/gp2040.h`** — declares `syncGpioGetAll()` and sync-related members
 
 ---
 
@@ -55,18 +52,14 @@ if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
 
 ```
 1. New press detected (raw_gpio bit goes 0→1)
-2. Release-bounce lockout: if this pin was released within syncDelay, ignore it (bounce)
-3. If no window open: start window, record press in sync_new bitmask
-4. If window already open: accumulate press into sync_new
-5. Every cycle: sync_new &= raw_buttons (drop any released press = bounce filtering)
-6. INSTANT FIRE: if 2+ attack buttons in sync_new → commit immediately
-7. Otherwise when (now_us - sync_start_us) >= syncDelay_us → commit sync_new
-8. Releases ALWAYS apply immediately (debouncedGpio &= ~just_released) + record timestamp
+2. If no window open: start window, record press in sync_new bitmask
+3. If window already open: accumulate press into sync_new
+4. Every cycle: sync_new &= raw_buttons (drop any released press = bounce filtering)
+5. When (now_us - sync_start_us) >= syncDelay_us → commit sync_new
+6. Releases ALWAYS apply immediately (debouncedGpio &= ~just_released)
 ```
 
-**Two-layer bounce filtering:**
-- **In-window filter** (step 5): `sync_new &= raw_buttons` clears presses that flicker OFF during the window
-- **Release-bounce lockout** (step 2): per-pin `lastRelease_us[]` timestamps prevent re-presses within syncDelay of release — catches bounces where the switch stays ON through the full window (e.g., 3-5ms off-time bounces that would otherwise pass through as stray jabs)
+**Bounce filtering:** `sync_new &= raw_buttons` every cycle clears presses that flicker OFF during the window. By the time the window expires and commits, bouncing switches have settled.
 
 ---
 
@@ -99,10 +92,18 @@ Both values are always stored in flash — switching modes preserves the other m
 - Node.js + npm (for web UI)
 
 ### Build All 4 Boards
+
+**From a terminal (not from Claude Code's bash shell):**
 ```powershell
 .\build_nobd.bat
 ```
 This builds RP2040AdvancedBreakoutBoard, Pico, PicoW, Pico2 and copies UF2s to `release/`.
+
+**From Claude Code's bash shell** (bash can't run .bat files directly — use full path via PowerShell):
+```bash
+powershell.exe -Command "cmd.exe /c 'C:\Users\trist\projects\GP2040-CE\build_nobd.bat'" 2>&1
+```
+Note: `cmd.exe /c build_nobd.bat` from bash often fails silently because the working directory isn't propagated. Always use the full absolute path to the batch file.
 
 **Important:** The SDK's mbedtls submodule must be at v2.28.8 for PS4 driver compatibility:
 ```bash
@@ -138,13 +139,15 @@ gh release create v0.7.12-nobd-X release/GP2040-CE-NOBD_0.7.12_*.uf2 --title "Ti
 
 | File | What Changed |
 |------|-------------|
-| `src/gp2040.cpp` | Restored stock debounce, added `syncGpioGetAll()` with instant fire, mutually exclusive dispatch |
-| `headers/gp2040.h` | Added `syncGpioGetAll()` declaration, `attackButtonGpios` member |
+| `src/gp2040.cpp` | Restored stock debounce, added `syncGpioGetAll()` with sync window, mutually exclusive dispatch |
+| `headers/gp2040.h` | Added `syncGpioGetAll()` declaration, `attackButtonGpios` member (unused, kept for future use) |
 | `proto/config.proto` | Added `nobdSyncDelay` field 34 to `GamepadOptions` |
 | `src/config_utils.cpp` | Added `DEFAULT_NOBD_SYNC_DELAY = 5` and `INIT_UNSET_PROPERTY` |
 | `src/webconfig.cpp` | Added `readDoc`/`writeDoc` for `nobdSyncDelay` |
 | `www/src/Pages/SettingsPage.jsx` | Mode dropdown + value field for input timing |
 | `www/src/Locales/en/SettingsPage.jsx` | Translation labels for input timing controls |
+| `test_finger_gap.py` | Enhanced with stray press detection, bounce detection, pre-fire analysis |
+| `tools/finger-gap-tester/` | Rust GUI tester (egui + gilrs) with Gap Tester and Button Monitor tabs |
 | `README.md` | Rewrite for NOBD documentation |
 | `.gitignore` | Added tool/build artifacts |
 

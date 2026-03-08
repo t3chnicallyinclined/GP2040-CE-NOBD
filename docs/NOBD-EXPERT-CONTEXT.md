@@ -240,7 +240,13 @@ Physical release:
 
 **Stock GP2040-CE debounce:** Waits 5ms after first state change before accepting it. Simple but effective.
 
-**NOBD bounce handling:** `sync_new &= raw_gpio` every cycle. If a switch bounces OFF during the window, that bit gets cleared from the pending buffer. When it bounces back ON, it's re-detected as a new press. By the time the window expires and commits, the switch has settled. This is **continuous validation** — more robust than a simple timer.
+**NOBD bounce handling:**
+
+**In-window filter:** `sync_new &= raw_buttons` every cycle. If a switch bounces OFF during the window, that bit gets cleared from the pending buffer. When it bounces back ON, it's re-detected as a new press. By the time the window expires and commits, the switch has settled. This is **continuous validation** — more robust than a simple timer.
+
+All presses wait the full sync window. This naturally handles transitional contacts during wavedashing: if a finger brushes a button while the window is still open from a multi-button press, the contact gets accumulated into the existing window rather than creating a separate stray.
+
+**Note:** Release-bounce lockout (per-pin timestamps preventing re-presses within N ms of release) was tried and reverted — it interfered with legitimate fast re-presses and didn't fully solve transitional contacts.
 
 ### USB HID Reports
 

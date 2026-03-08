@@ -50,7 +50,7 @@ print("-" * 65)
 
 # --- State ---
 gaps = []                    # gap_ms for each detected pair
-strays = []                  # (button_id, solo_ms, reason) for each stray
+strays = []                  # (button_id, solo_ms, reason, off_time_ms) for each stray
 bounces = []                 # (button_id, off_duration_ms) for each bounce
 pair_count = 0
 
@@ -70,8 +70,16 @@ def get_button_state(btn):
     return button_states[btn]
 
 def record_stray(btn, solo_ms, reason):
-    strays.append((btn, solo_ms, reason))
-    print(f"  >>> STRAY: Btn {btn} solo for {solo_ms:.1f}ms ({reason})")
+    # Calculate off-time: how long since this button was last released before this press
+    bs = get_button_state(btn)
+    off_time_ms = None
+    if bs['last_release'] is not None and bs['last_press'] is not None:
+        off_time_ms = (bs['last_press'] - bs['last_release']) * 1000
+        if off_time_ms < 0:
+            off_time_ms = None  # release was after press (not a re-press scenario)
+    strays.append((btn, solo_ms, reason, off_time_ms))
+    off_str = f"  [off-time: {off_time_ms:.1f}ms]" if off_time_ms is not None else ""
+    print(f"  >>> STRAY: Btn {btn} solo for {solo_ms:.1f}ms ({reason}){off_str}")
 
 def record_bounce(btn, off_ms):
     bounces.append((btn, off_ms))
@@ -241,19 +249,19 @@ except KeyboardInterrupt:
 
         # Per-button breakdown
         by_button = defaultdict(list)
-        for btn, solo_ms, reason in strays:
-            by_button[btn].append((solo_ms, reason))
+        for btn, solo_ms, reason, off_time_ms in strays:
+            by_button[btn].append((solo_ms, reason, off_time_ms))
 
         print()
         print("  Per-button breakdown:")
         for btn in sorted(by_button.keys()):
             entries = by_button[btn]
-            avg_solo = sum(s for s, _ in entries) / len(entries)
+            avg_solo = sum(s for s, _, _ in entries) / len(entries)
             print(f"    Btn {btn}:  {len(entries)} stray(s)  (avg solo: {avg_solo:.1f}ms)")
 
         # By reason
         by_reason = defaultdict(int)
-        for _, _, reason in strays:
+        for _, _, reason, _ in strays:
             by_reason[reason] += 1
 
         print()
@@ -262,11 +270,24 @@ except KeyboardInterrupt:
             print(f"    {reason}: {count}")
 
         # Solo durations
-        solo_durations = [s for _, s, _ in strays]
+        solo_durations = [s for _, s, _, _ in strays]
         print()
         print(f"  Solo durations:  min: {min(solo_durations):.1f}ms  "
               f"max: {max(solo_durations):.1f}ms  "
               f"avg: {sum(solo_durations)/len(solo_durations):.1f}ms")
+
+        # Off-time analysis (time since last release of same button → helps tune lockout)
+        off_times = [ot for _, _, _, ot in strays if ot is not None]
+        if off_times:
+            print()
+            print(f"  Off-times (release→re-press):  min: {min(off_times):.1f}ms  "
+                  f"max: {max(off_times):.1f}ms  "
+                  f"avg: {sum(off_times)/len(off_times):.1f}ms")
+            under_25 = sum(1 for ot in off_times if ot < 25)
+            print(f"  Off-time < 25ms (caught by lockout): {under_25} / {len(off_times)}")
+            over_25 = sum(1 for ot in off_times if ot >= 25)
+            if over_25:
+                print(f"  Off-time >= 25ms (NOT caught by lockout): {over_25} / {len(off_times)}")
 
     # --- Bounce Detection ---
     print()
