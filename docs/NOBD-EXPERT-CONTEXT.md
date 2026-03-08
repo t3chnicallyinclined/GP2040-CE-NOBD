@@ -356,7 +356,7 @@ flash read → protobuf deserialize (on boot)
 
 When verifying NOBD behavior:
 
-1. **Finger gap tester** (Rust GUI or Python) — measures natural human timing
+1. **[Finger gap tester](https://github.com/t3chnicallyinclined/finger-gap-tester)** (Rust GUI or Python CLI) — measures natural human timing, detects strays/bounces/pre-fire
 2. **In-game testing** — try 50 dashes in training mode, count drops
 3. **Logic analyzer** — attach to GPIO pins and USB data lines to verify timing at hardware level
 4. **Cross-platform** — test on PC, console, and Dreamcast (worst case for frame boundaries)

@@ -146,8 +146,8 @@ gh release create v0.7.12-nobd-X release/GP2040-CE-NOBD_0.7.12_*.uf2 --title "Ti
 | `src/webconfig.cpp` | Added `readDoc`/`writeDoc` for `nobdSyncDelay` |
 | `www/src/Pages/SettingsPage.jsx` | Mode dropdown + value field for input timing |
 | `www/src/Locales/en/SettingsPage.jsx` | Translation labels for input timing controls |
-| `test_finger_gap.py` | Enhanced with stray press detection, bounce detection, pre-fire analysis |
-| `tools/finger-gap-tester/` | Rust GUI tester (egui + gilrs) with Gap Tester and Button Monitor tabs |
+| ~~`test_finger_gap.py`~~ | Moved to [finger-gap-tester](https://github.com/t3chnicallyinclined/finger-gap-tester) repo |
+| ~~`tools/finger-gap-tester/`~~ | Moved to [finger-gap-tester](https://github.com/t3chnicallyinclined/finger-gap-tester) repo |
 | `README.md` | Rewrite for NOBD documentation |
 | `.gitignore` | Added tool/build artifacts |
 

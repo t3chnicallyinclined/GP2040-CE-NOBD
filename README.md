@@ -86,9 +86,7 @@ Built for **RP2040 Advanced Breakout Board**. To build for a different board, ch
 
 ## Finger Gap Tester
 
-The release includes **finger-gap-tester.exe** — plug in your stick, press two buttons at the same time, and it shows your natural finger gap in milliseconds with a recommended NOBD value.
-
-**Windows SmartScreen note:** The .exe is unsigned, so Windows may warn you. Click "More info" → "Run anyway", or right-click → Properties → "Unblock".
+Measure your natural finger gap with the **[Finger Gap Tester](https://github.com/t3chnicallyinclined/finger-gap-tester)** — available as a Python CLI or Rust GUI app. Detects strays, bounces, pre-fire, and recommends a NOBD sync window value.
 
 ## References
 
