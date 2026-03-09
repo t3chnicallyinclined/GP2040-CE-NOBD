@@ -106,28 +106,9 @@ If you want to build the firmware yourself (e.g. for a different board), you'll 
    ```
 4. UF2 files will be in the `release/` directory
 
-### Troubleshooting: mbedtls Errors
+### Note on mbedtls / Pico SDK Compatibility
 
-If you see errors like:
-```
-#error "MBEDTLS_RSA_C defined, but not all prerequisites"
-#error "MBEDTLS_SSL_ASYNC_PRIVATE defined, but not all prerequisites"
-```
-
-This means the Pico SDK's bundled mbedtls is the wrong version. The PS4 authentication driver requires mbedtls **v2.28.8**, but newer Pico SDK versions bundle a newer mbedtls that breaks compatibility.
-
-**Fix:**
-
-1. Find your Pico SDK's mbedtls directory. It's either:
-   - Inside the build folder: `build/_deps/pico_sdk-src/lib/mbedtls/` (if using fetchcontent)
-   - At your `PICO_SDK_PATH`: `<your-sdk-path>/lib/mbedtls/` (if using an external SDK)
-2. Open a terminal in that directory and run:
-   ```
-   git checkout v2.28.8
-   ```
-3. Rebuild the firmware
-
-If you're unsure where your SDK is, check the error paths in the build output — they'll show the full path to mbedtls.
+The PS4 authentication driver uses mbedtls v3 API calls, compatible with Pico SDK 2.x. No special steps are needed — just clone, build, and go.
 
 ## Finger Gap Tester
 
