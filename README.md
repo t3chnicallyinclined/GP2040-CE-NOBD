@@ -2,7 +2,7 @@
 
 A fork of [GP2040-CE](https://gp2040-ce.info/) v0.7.12 that adds **NOBD (No OBD)** — a sync window that groups near-simultaneous button presses so they arrive on the same USB frame. Built for MvC2, where dropped dashes from split LP+HP presses are a constant problem.
 
-> **Zero added latency.** Stock GP2040-CE already debounces every input at 5ms. NOBD replaces that debounce with a 5ms sync window — same latency, but your simultaneous presses are guaranteed to arrive together.
+> **Minimal latency, maximum reliability.** Stock debounce accepts each press instantly but can't group them — your "simultaneous" buttons arrive on different USB frames. NOBD holds presses for up to 5ms to guarantee grouping. That's less than a third of one game frame (16.67ms), and the same timing budget stock debounce already uses for bounce filtering.
 
 ## Demo (MvC2)
 
@@ -70,7 +70,7 @@ In the GP2040-CE web UI (hold S2 on boot → `http://192.168.7.1` → Settings):
 | Slider | Behavior |
 |--------|----------|
 | **0 ms** | Raw passthrough, no sync or debounce |
-| **3-5 ms** | Recommended range. 5ms = same latency as stock debounce |
+| **3-5 ms** | Recommended range. 5ms = same timing budget as stock debounce |
 | **6-8 ms** | If you still get occasional drops |
 
 Works on all platforms GP2040-CE supports (PC, Dreamcast via adapter, PS3/PS4/Switch, MiSTer, etc.) since the sync window operates at the GPIO level before any protocol-specific output.
@@ -84,12 +84,58 @@ Works on all platforms GP2040-CE supports (PC, Dreamcast via adapter, PS3/PS4/Sw
 
 Built for **RP2040 Advanced Breakout Board**. To build for a different board, change the board config in `build_fw.bat` and run `.\build_fw.bat`.
 
+## Building from Source
+
+If you want to build the firmware yourself (e.g. for a different board), you'll need:
+
+- Windows with MSVC Build Tools 2022
+- CMake + Ninja
+- ARM GCC toolchain (arm-none-eabi-gcc)
+- Node.js + npm (for web UI)
+
+### Build Steps
+
+1. Clone the repo and open a terminal in the project root
+2. Build the web UI (only needed on first build or after changing `www/`):
+   ```
+   cd www && npm install && npm run build && cd ..
+   ```
+3. Run the build script:
+   ```powershell
+   .\build_nobd.bat
+   ```
+4. UF2 files will be in the `release/` directory
+
+### Troubleshooting: mbedtls Errors
+
+If you see errors like:
+```
+#error "MBEDTLS_RSA_C defined, but not all prerequisites"
+#error "MBEDTLS_SSL_ASYNC_PRIVATE defined, but not all prerequisites"
+```
+
+This means the Pico SDK's bundled mbedtls is the wrong version. The PS4 authentication driver requires mbedtls **v2.28.8**, but newer Pico SDK versions bundle a newer mbedtls that breaks compatibility.
+
+**Fix:**
+
+1. Find your Pico SDK's mbedtls directory. It's either:
+   - Inside the build folder: `build/_deps/pico_sdk-src/lib/mbedtls/` (if using fetchcontent)
+   - At your `PICO_SDK_PATH`: `<your-sdk-path>/lib/mbedtls/` (if using an external SDK)
+2. Open a terminal in that directory and run:
+   ```
+   git checkout v2.28.8
+   ```
+3. Rebuild the firmware
+
+If you're unsure where your SDK is, check the error paths in the build output — they'll show the full path to mbedtls.
+
 ## Finger Gap Tester
 
 Measure your natural finger gap with the **[Finger Gap Tester](https://github.com/t3chnicallyinclined/finger-gap-tester)** — available as a Python CLI or Rust GUI app. Detects strays, bounces, pre-fire, and recommends a NOBD sync window value.
 
 ## References
 
+- [Why 1000Hz USB Polling Breaks Your Dashes](docs/WHY-NOBD.md) — Deep dive into USB polling, debounce vs sync, switch types, and the Dreamcast comparison
 - [Dreamcast Maple Bus](https://dreamcast.wiki/Maple_bus) — 60Hz VBlank-synced polling (no intermediate reports)
 - [XInputGetState](https://learn.microsoft.com/en-us/windows/win32/api/xinput/nf-xinput-xinputgetstate) — Snapshot-only API
 - [DirectInput Buffered Mode](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee416236(v=vs.85)) — Sees every state change
