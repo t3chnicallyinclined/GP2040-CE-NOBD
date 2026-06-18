@@ -37,6 +37,7 @@
 #include "pico/bootrom.h"
 #include "pico/time.h"
 #include "hardware/adc.h"
+#include "hardware/watchdog.h"
 
 #include "rndis.h"
 
@@ -51,6 +52,15 @@ static const uint32_t REBOOT_HOTKEY_HOLD_TIME_MS = 4000;
 
 const static uint32_t rebootDelayMs = 500;
 static absolute_time_t rebootDelayTimeout = nil_time;
+
+// Hardware watchdog: if the Core0 main loop ever stalls longer than this (a
+// hang — e.g. a wedged peripheral or a stuck multicore lockout), the chip
+// auto-reboots and re-enumerates instead of requiring a physical replug.
+// 2s is well above any legitimate loop iteration; the only Core0 operation
+// that can approach it is the 32KB flash config save, which feeds the dog
+// itself (see FlashPROM::writeToFlash) and only ever runs on a settings
+// change, never during a match.
+const static uint32_t WATCHDOG_TIMEOUT_MS = 2000;
 
 void GP2040::setup() {
 	Storage::getInstance().init();
@@ -396,7 +406,15 @@ void GP2040::run() {
 		}
 	}
 
+	// Arm the hardware watchdog now that init is done. pause_on_debug=true so
+	// it won't fire while halted under a debugger.
+	watchdog_enable(WATCHDOG_TIMEOUT_MS, true);
+
 	while (1) {
+		// Feed the watchdog first thing every iteration. If the loop never
+		// comes back around (a hang), the chip resets within the timeout.
+		watchdog_update();
+
 		this->getReinitGamepad(gamepad);
 		memcpy(&prevState, &gamepad->state, sizeof(GamepadState));
 
