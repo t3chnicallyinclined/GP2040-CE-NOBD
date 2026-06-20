@@ -4,7 +4,25 @@
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?logo=ko-fi)](https://ko-fi.com/trisdog)
 [![Donate via Strike](https://img.shields.io/badge/Donate-Strike-7B68EE?logo=bitcoin)](https://strike.me/nobd)
 
-A fork of [GP2040-CE](https://gp2040-ce.info/) v0.7.12 that adds **NOBD (No OBD)** — a sync window that groups near-simultaneous button presses so they arrive on the same USB frame. Built for MvC2, where split LP+HP presses cause dropped dashes.
+**NOBD makes the two buttons you actually pressed land on the same frame.**
+
+It's USB polling with the window aimed at your finger. 1000Hz USB shrank the game's 16ms input frame down to 1ms and started splitting your two-button inputs across frames. That's the dropped dash. NOBD groups your simultaneous presses back onto the same frame: same buttons, you press both, it only changes *when* they land, and it costs a few milliseconds to do it. (The name stands for No OBD, as in the opposite of a One Button Dash macro.)
+
+Proven for MvC2 dashes. The same fix applies to any era fighter that needs two buttons at once:
+
+| Game | Simultaneous input | Status |
+|------|--------------------|--------|
+| Marvel vs Capcom 2 | dash (two punches / two kicks) | Proven |
+| MvC1 / X-Men vs SF / VS-series | dash (two buttons) | Same mechanic, should help |
+| Capcom vs SNK 2 | roll (LP+LK) | Same mechanic, should help |
+| KOF series | roll / dodge (A+B) | Same mechanic, should help |
+| Any game with a two-button input | simultaneous press | Should help |
+
+> Only MvC2 is tested directly. The others share the same simultaneous-press mechanic, so the same fix should apply, but treat them as untested until confirmed.
+
+**Is NOBD cheating? Read the [Position Statement](docs/POSITION.md).** Short answer: it changes *when* your inputs arrive, never *what* they are, and it costs you latency to do it.
+
+*Built on [GP2040-CE](https://gp2040-ce.info/) v0.7.12.*
 
 > **Also includes a native Dreamcast Maple Bus driver** — play on a real DC without an adapter. [Jump to Dreamcast wiring →](#dreamcast-native-controller)
 
@@ -162,6 +180,14 @@ The short version: when you press two buttons "simultaneously," your fingers are
 NOBD holds the first press for up to 5ms so both buttons commit on the same frame. Nothing added, nothing invented — just your two presses arriving together instead of split by a timing boundary you can't see or control.
 
 [Full technical explanation →](docs/WHY-NOBD.md)
+
+---
+
+## Is This Cheating?
+
+Cheating fabricates intent. An aimbot aims for you, a macro presses for you, OBD fires two buttons from one. NOBD does the opposite: it never invents an input, requires you to physically press every button, and costs you latency to do it. It only makes the two presses you actually made arrive together, the way the game was built to read them.
+
+The full reasoning, the fairness case, and our response to being called cheaters are in the **[NOBD Position Statement](docs/POSITION.md)**.
 
 ---
 
