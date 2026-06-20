@@ -23,7 +23,7 @@ A controller has one job: deliver what you meant to do to the game intact.
 - Human intent lands at 2 to 8ms. Press two buttons "together" and your fingers are that far apart. That gap is one intention, not two. (Measure your own with the [Finger Gap Tester](https://github.com/t3chnicallyinclined/finger-gap-tester).)
 - USB reads at 1ms.
 
-The whole problem in one line: **USB reads finer than human intent exists.** At 1ms, a single intention spread across a 3ms finger gap is sliced into two inputs and handed to the game as if you meant them apart. That is not a quirk of the platform. It is a measurement error, reading intent at a resolution where intent does not resolve.
+The whole problem in one line: **USB reads finer than human intent resolves.** At 1ms, a single intention spread across a 3ms finger gap is sliced into two inputs and handed to the game as if you meant them apart. That is not a quirk of the platform. It is a measurement error, reading intent at a resolution where intent does not resolve.
 
 Every input layer is already an intent-reading system. The 16ms frame, input buffers, debounce, and SOCD cleaning all exist to infer what you meant from imperfect signals. Intent is not a word invented to defend NOBD. It is the operating principle the whole stack already runs on.
 
