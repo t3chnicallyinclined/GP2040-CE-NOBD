@@ -29,3 +29,12 @@ Hardware/
 branding/
 
 
+
+# Internal dev + hardware planning docs (kept local, not published)
+docs/v2-hardware/
+docs/EXPERT-CONTEXT.md
+docs/AGENT-HANDOFF-PRECOMPUTED-TABLES.md
+docs/MAPLECAST-ARCHITECTURE.md
+docs/WORKSTREAM-SERVERSYNC.md
+docs/GP-RETRO-ONLINE-MVP.md
+docs/W6100-SETUP-GUIDE.md
