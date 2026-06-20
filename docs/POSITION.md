@@ -1,5 +1,16 @@
 # NOBD Position Statement
 
+## The whole feature in one picture
+
+Stock GP2040-CE already waits with a 5ms debounce by default to filter switch noise. NOBD sits in that exact same slot and uses the same default 5ms, spending it to wait for your two presses to land together instead:
+
+```
+Stock GP2040-CE (default):  press -> GPIO -> debounce: 5ms noise filter       -> state -> USB report
+NOBD (default):             press -> GPIO -> sync window: 5ms, wait for intent -> state -> USB report
+```
+
+Same pipeline. Same slot. Same default 5ms. The only change is what the 5ms does. (NOBD's wait happens before the press commits, so it costs up to 5ms of first-press latency, which is the honest tradeoff.)
+
 ## What NOBD is
 
 A controller has one job: deliver what you meant to do to the game intact.
@@ -18,7 +29,7 @@ Every input layer is already an intent-reading system. The 16ms frame, input buf
 
 NOBD restores a window wide enough to hold one human intent, and aims it at your press so it never slices one in half.
 
-This is the same hold-and-group USB polling already does. At 1000Hz, every press is held until the next poll up to 1ms away, and presses that land in the same interval are reported together. That is a 1ms window fixed to a clock, too small to hold a finger gap. NOBD changes one thing: the window starts at your press and is wide enough to contain one intent.
+USB polling already samples input on a fixed 1ms clock, and stock firmware sends each change as soon as the USB endpoint is free. It does not wait or group, so a 2 to 8ms finger gap reliably splits across polls. NOBD replaces that with a deliberate window, sized to a finger gap (5ms) and anchored to your press, so the presses group instead of split.
 
 ## What NOBD does and does not do
 

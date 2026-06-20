@@ -88,7 +88,18 @@ NOBD restores a window wide enough to hold one human intent (default 5ms), and a
 
 When a new press is detected, the firmware holds it briefly (default 5ms) instead of reporting it immediately. Additional presses during that window join it. When the window expires, they commit together, on the same report.
 
-This is not a new mechanism. It is what USB polling already does. At 1000Hz, the host reads the controller once per millisecond, so every press is already held, invisible to the game, until the next poll up to 1ms away, and two presses that land in the same 1ms interval are already reported together. Standard polling, including stock GP2040-CE, is a hold-and-group window. It is just 1ms wide and fixed to a clock, too small to contain a 2 to 8ms finger gap, so it splits the press. NOBD changes one thing: the window starts when you press instead of on a fixed clock tick, and it is wide enough to hold one human intent. Same mechanism, aimed at your finger.
+USB polling already samples your inputs on a fixed clock: at 1000Hz the host reads the controller at most once per millisecond, so a press isn't visible to the game until the next poll, up to 1ms away. Stock firmware, GP2040-CE included, sends each change the moment the USB endpoint is free (you can see this in its XInput and HID drivers: build the report, and if it changed and the endpoint isn't busy, send it). It does not deliberately wait or group. So whether two near-simultaneous presses land in the same report is an incidental, sub-millisecond lottery, and a 2 to 8ms finger gap reliably splits across polls. NOBD replaces that with a deliberate window: sized to a finger gap (5ms) and anchored to your press, so the two presses are grouped instead of split.
+
+The pipeline is identical except for one box, and even the default timing matches. Stock GP2040-CE already runs a 5ms debounce by default (`DEFAULT_DEBOUNCE_DELAY = 5`); NOBD's window defaults to the same 5ms (`DEFAULT_NOBD_SYNC_DELAY = 5`), in the exact same slot. The two are mutually exclusive in the firmware:
+
+```
+STOCK GP2040-CE (default):  button -> GPIO -> debounce: 5ms per-pin noise filter  -> state -> USB report*
+NOBD (default):             button -> GPIO -> sync window: 5ms, wait for intent    -> state -> USB report*
+
+* sent on change; the host collects it at its next 1ms poll
+```
+
+NOBD does not add a stage. It occupies the same slot as debounce and uses the same default 5ms. The only change is what that 5ms does: debounce filters per-pin noise, NOBD waits for your presses to finish landing, then commits them together. (One honest difference: NOBD's 5ms is a wait before the press commits, so it adds up to 5ms of first-press latency, where debounce accepts the press instantly and locks out after. See the tradeoff below.)
 
 - **Releases apply immediately.** Negative edge and fast inputs are unaffected.
 - **Bounce filtering is built in.** The buffer is continuously validated against live GPIO, so a press that bounces off during the window is dropped before commit.
