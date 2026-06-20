@@ -1,6 +1,6 @@
 # Why NOBD Exists: The Evidence
 
-NOBD rests on one claim: **1000Hz USB polling reads your inputs at a finer resolution than human intent exists, splitting a single intended press into separate inputs.** This document is the evidence for that claim. For what NOBD is and why it is fair, see the **[Position Statement](POSITION.md)**.
+NOBD rests on one claim: **1000Hz USB polling reads your inputs at a finer resolution than human intent resolves, splitting a single intended press into separate inputs.** This document is the evidence for that claim. For what NOBD is and why it is fair, see the **[Position Statement](POSITION.md)**.
 
 > NOBD was built for and tested on Marvel vs Capcom 2 (via Marvel vs Capcom Fighting Collection on Steam). That is the proven case. The same mechanism applies to any game that requires simultaneous presses and has no input leniency, but MvC2 is the one actually measured here. I'm a cloud engineer, not a firmware dev. Everything below was pieced together from datasheets, API docs, community threads, testing, and a lot of trial and error. If you spot something wrong, correct me.
 
@@ -78,7 +78,7 @@ On Dreamcast the controller state is read once per VBlank (~16.67ms), synchroniz
 
 ## Intent and resolution
 
-The 16ms frame was the game's window for reading intent: anything inside one frame, it treats as one intended moment. Human intent lands at 2 to 8ms. USB's 1ms read is finer than human intent exists, so it slices one intention into two inputs.
+The 16ms frame was the game's window for reading intent: anything inside one frame, it treats as one intended moment. Human intent lands at 2 to 8ms. USB's 1ms read is finer than human intent resolves, so it slices one intention into two inputs.
 
 NOBD restores a window wide enough to hold one human intent (default 5ms), and aims it at your press so it never slices one in half. It is **stricter than the original 16ms hardware window, not looser.** Full reasoning and the fairness case are in the **[Position Statement](POSITION.md)**.
 
