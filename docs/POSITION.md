@@ -18,6 +18,8 @@ Every input layer is already an intent-reading system. The 16ms frame, input buf
 
 NOBD restores a window wide enough to hold one human intent, and aims it at your press so it never slices one in half.
 
+This is the same hold-and-group USB polling already does. At 1000Hz, every press is held until the next poll up to 1ms away, and presses that land in the same interval are reported together. That is a 1ms window fixed to a clock, too small to hold a finger gap. NOBD changes one thing: the window starts at your press and is wide enough to contain one intent.
+
 ## What NOBD does and does not do
 
 It does:

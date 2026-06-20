@@ -88,6 +88,8 @@ NOBD restores a window wide enough to hold one human intent (default 5ms), and a
 
 When a new press is detected, the firmware holds it briefly (default 5ms) instead of reporting it immediately. Additional presses during that window join it. When the window expires, they commit together, on the same report.
 
+This is not a new mechanism. It is what USB polling already does. At 1000Hz, the host reads the controller once per millisecond, so every press is already held, invisible to the game, until the next poll up to 1ms away, and two presses that land in the same 1ms interval are already reported together. Standard polling, including stock GP2040-CE, is a hold-and-group window. It is just 1ms wide and fixed to a clock, too small to contain a 2 to 8ms finger gap, so it splits the press. NOBD changes one thing: the window starts when you press instead of on a fixed clock tick, and it is wide enough to hold one human intent. Same mechanism, aimed at your finger.
+
 - **Releases apply immediately.** Negative edge and fast inputs are unaffected.
 - **Bounce filtering is built in.** The buffer is continuously validated against live GPIO, so a press that bounces off during the window is dropped before commit.
 - **It replaces stock debounce.** The two are mutually exclusive.
