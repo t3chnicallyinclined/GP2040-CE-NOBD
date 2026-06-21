@@ -1,5 +1,8 @@
 # GP2040-CE NOBD
 
+> ### NOBD keeps your inputs honest and your intent intact.
+> **Execution is back. No more fighting a broken pipeline between your hands and the game.**
+
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=github)](https://github.com/sponsors/t3chnicallyinclined)
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?logo=ko-fi)](https://ko-fi.com/trisdog)
 [![Donate via Strike](https://img.shields.io/badge/Donate-Strike-7B68EE?logo=bitcoin)](https://strike.me/nobd)
