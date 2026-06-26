@@ -32,7 +32,7 @@ https://github.com/user-attachments/assets/a56967f7-1b35-4f8f-9fda-de62dac0b089
 3. Drag and drop the `.uf2` onto the `RPI-RP2` drive that appears
 4. Board reboots with new firmware — done
 
-**Supported boards:** RP2040AdvancedBreakoutBoard, Pico, PicoW, Pico2
+**Supported boards:** RP2040AdvancedBreakoutBoard, Pico, PicoW, Haute42 COSMOX
 
 ---
 
@@ -50,6 +50,15 @@ Open the web UI: hold **S2** on boot → navigate to `http://192.168.7.1` → **
 **Recommended:** Start at 5ms. If you still drop dashes occasionally, try 6–8ms.
 
 A **Release Debounce** checkbox appears in NOBD mode — enables bounce filtering on button release. Off by default. Useful for rhythm games where release bounce causes phantom inputs, not needed for fighting games.
+
+### Toggle NOBD live
+
+You don't have to open the web UI to switch NOBD on and off. Two options, configurable in the web UI:
+
+- **Hotkey** — assign **"NOBD On/Off Toggle"** under *Settings → Hotkey Settings* to any button combo. Flips NOBD on/off instantly. Global, persists across reboot.
+- **Per-profile pin** — assign **"NOBD On/Off Toggle"** to any pin under *GPIO Pin Mapping*. A tap latches it on/off, and because pin maps are per-profile you can wire it differently per layout.
+
+If you have an OLED, the status bar shows the current state in every mode: **`N+5`** when on (with the sync window in ms) or **`N-`** when off.
 
 
 ---
@@ -151,7 +160,7 @@ Wipe and re-format the VMU. Requires typing "FORMAT" to confirm — all saves ar
 
 ### Input Timing for Dreamcast
 
-Debounce and NOBD sync windows are generally unnecessary in Dreamcast mode. The 16ms Maple Bus polling interval acts as a natural sync window — simultaneous presses within that window always land on the same frame. The default for fresh installs is Stock Debounce 0 (raw passthrough).
+The 16ms Maple Bus polling interval already acts as a natural sync window — simultaneous presses within that window land on the same frame — so the default for fresh installs is Stock Debounce 0 (raw passthrough). NOBD is **no longer forced off** in Dreamcast mode, though: if you want it, turn it on and it applies to the Maple output just like it does over USB. The toggle hotkey/pin and the OLED `N+`/`N-` indicator work in Dreamcast mode too.
 
 <!-- SCREENSHOT: Input timing section showing the Dreamcast debounce hint -->
 ![Dreamcast debounce hint placeholder](docs/images/dc-debounce-hint-placeholder.png)
