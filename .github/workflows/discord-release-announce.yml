@@ -1,0 +1,35 @@
+name: Discord release announce
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          ANNOUNCE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK_ANNOUNCE }}
+          FIRMWARE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK_FIRMWARE }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+          name="${RELEASE_NAME:-$TAG}"
+          repo_short="${REPO##*/}"
+          body="$(printf '%s' "${RELEASE_BODY:-}" | head -c 1200)"
+          content="$(printf '🔧 **New release — %s**  ·  _%s_\n\n%s\n\n→ <%s>' "$name" "$repo_short" "$body" "$RELEASE_URL")"
+          payload="$(jq -n --arg c "$content" '{content: $c}')"
+          post() {
+            wh="$1"; label="$2"
+            if [ -z "$wh" ]; then echo "skip $label (no webhook configured)"; return 0; fi
+            code="$(curl -sS -o /tmp/dresp -w '%{http_code}' -H 'Content-Type: application/json' -d "$payload" "$wh")"
+            echo "$label -> HTTP $code"
+            case "$code" in 2*) ;; *) echo "  body: $(cat /tmp/dresp)"; exit 1 ;; esac
+          }
+          post "$ANNOUNCE_WEBHOOK" "#announcements"
+          post "$FIRMWARE_WEBHOOK" "#firmware"
