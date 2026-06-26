@@ -111,6 +111,8 @@ When enabled, releases are buffered using the same sync window timer. If the swi
 
 USB polls at 1000Hz (1ms). Human fingers have 2-8ms gap between "simultaneous" presses. At 1ms polling, this gap is visible as separate USB reports. Games with zero input leniency (MvC2) see this as sequential presses → wrong move (jab instead of dash). NOBD groups them so both appear on the same USB frame. See `docs/WHY-NOBD.md` for the full technical argument.
 
+**Independent measurement (VodkaGobalsky, 2026):** a relay-rig test (two buttons at fixed 0–15ms delays, ~100 samples/condition, CVS2 + SFA3 across platforms, with an arcade baseline) found older/slower-polling boards (Xbox 360 TE ~125Hz) register simultaneous presses *more* consistently than faster ones (Brook UFB 1000Hz) — the TE even beat arcade-direct. This independently corroborates NOBD's thesis (slow sampling groups near-simultaneous presses). Two honest framings for any agent citing it: (1) it's the **two-button co-registration vs poll rate** metric nobody had measured; (2) the author credits poll rate, but **same-USB-speed boards differ**, so the effect is firmware input conditioning too, not poll rate alone — exact mechanism unknowable (closed source). Don't overstate: community test, ~100 samples, poll rate not isolated from debounce, "better-than-arcade" is baseline-dependent. Doc: https://docs.google.com/document/d/1-kShrBweYHEj-UstW-Vx2FJ_OhwDhNQoqMzNtUNMwRw/edit · https://x.com/LiquidGobalsky/status/2059074285726298367
+
 ---
 
 ## 4. Dreamcast Maple Bus Driver
