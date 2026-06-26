@@ -86,6 +86,7 @@ void Gamepad::setup()
 	mapAnalogRSYPos = new GamepadButtonMapping(ANALOG_DIRECTION_RS_Y_POS);
 	map48WayMode    = new GamepadButtonMapping(SUSTAIN_4_8_WAY_MODE);
 	mapFocusMode    = new GamepadButtonMapping(SUSTAIN_FOCUS_MODE);
+	mapNobdToggle   = new GamepadButtonMapping(NOBD_TOGGLE);
 
 	const auto assignCustomMappingToMaps = [&](GpioMappingInfo mapInfo, Pin_t pin) -> void {
 		if (mapDpadUp->buttonMask & mapInfo.customDpadMask)	mapDpadUp->pinMask |= 1 << pin;
@@ -166,6 +167,7 @@ void Gamepad::setup()
 			case GpioAction::ANALOG_DIRECTION_RS_Y_POS:	mapAnalogRSYPos->pinMask |= 1 << pin; break;
 			case GpioAction::SUSTAIN_4_8_WAY_MODE:	map48WayMode->pinMask |= 1 << pin; break;
 			case GpioAction::SUSTAIN_FOCUS_MODE: mapFocusMode->pinMask |= 1 << pin; break;
+			case GpioAction::NOBD_TOGGLE: mapNobdToggle->pinMask |= 1 << pin; break;
 			default:				break;
 		}
 	}
@@ -244,6 +246,7 @@ void Gamepad::reinit()
 	delete mapAnalogRSYPos;
 	delete map48WayMode;
 	delete mapFocusMode;
+	delete mapNobdToggle;
 
 	// reinitialize pin mappings
 	this->setup();
@@ -316,6 +319,13 @@ void Gamepad::process()
 		default:
 			break;
 	}
+
+	// Latching NOBD toggle pin (per-profile via GPIO mapping): flip on rising edge.
+	// Mirrors the HOTKEY_NOBD_TOGGLE behavior via the shared helper.
+	if (nobdTogglePinPressed && !nobdTogglePinPrev) {
+		toggleNobd();
+	}
+	nobdTogglePinPrev = nobdTogglePinPressed;
 }
 
 void Gamepad::read()
@@ -380,6 +390,9 @@ void Gamepad::read()
 	else					activeDpadMode = options.dpadMode;
 
 	map48WayModeToggle = (values & map48WayMode->pinMask);
+
+	// Capture NOBD_TOGGLE pin state here; the rising-edge flip happens in process().
+	nobdTogglePinPressed = (values & mapNobdToggle->pinMask);
 
 	if (values & mapAnalogLSXNeg->pinMask) {
 		state.lx = GAMEPAD_JOYSTICK_MIN;
@@ -453,6 +466,27 @@ void Gamepad::clearRumbleState() {
 	auxState.haptics.leftTrigger.intensity = 0;
 	auxState.haptics.rightTrigger.active = false;
 	auxState.haptics.rightTrigger.intensity = 0;
+}
+
+/**
+ * @brief Flip the NOBD sync window on/off and persist it. Shared by the
+ * HOTKEY_NOBD_TOGGLE hotkey and the NOBD_TOGGLE pin action.
+ *
+ * The main loop reads nobdSyncDelay fresh every cycle, so the change takes effect
+ * instantly. Saved to flash like the other toggles (SOCD, 4-Way, Invert) so the
+ * on/off choice persists across reboot. The session static remembers the on-value
+ * so toggling back on restores your configured window; after a reboot (saved value
+ * is 0) it falls back to the 5ms default — matching the web UI's Stock/NOBD dropdown.
+ */
+void Gamepad::toggleNobd() {
+	static uint32_t lastNobdSyncDelay = 0;
+	if (options.nobdSyncDelay > 0) {
+		lastNobdSyncDelay = options.nobdSyncDelay;
+		options.nobdSyncDelay = 0;
+	} else {
+		options.nobdSyncDelay = (lastNobdSyncDelay > 0) ? lastNobdSyncDelay : 5;
+	}
+	EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true));
 }
 
 /**
@@ -756,6 +790,13 @@ void Gamepad::processHotkeyAction(GamepadHotkey action) {
 				}
 			}
 		}
+			break;
+		case HOTKEY_NOBD_TOGGLE:
+			// Flip NOBD on/off (shared with the NOBD_TOGGLE pin action). toggleNobd()
+			// handles the value swap and the flash save itself.
+			if (action != lastAction) {
+				toggleNobd();
+			}
 			break;
 		default: // Unknown action
 			break;

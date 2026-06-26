@@ -419,9 +419,15 @@ void GP2040::run() {
 		memcpy(&prevState, &gamepad->state, sizeof(GamepadState));
 
 		if (dcMode) {
-			// DC polls at 60Hz (16.67ms) — switch bounce (1-5ms) settles
-			// long before the next poll. Always use raw passthrough.
-			gamepad->debouncedGpio = ~gpio_get_all();
+			// NOBD is user-controllable in DC mode too — debouncedGpio feeds
+			// updateCmd9FromGpio() below, so the sync window applies to Maple output.
+			// With NOBD off: raw passthrough (DC polls at 60Hz, so switch bounce
+			// of 1-5ms settles long before the next poll — no debounce needed).
+			if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
+				syncGpioGetAll();
+			} else {
+				gamepad->debouncedGpio = ~gpio_get_all();
+			}
 			gamepad->setDpadMode(DPAD_MODE_DIGITAL);
 		} else if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
 			syncGpioGetAll();
