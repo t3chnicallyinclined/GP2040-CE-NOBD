@@ -13,7 +13,7 @@ if exist "build\_deps\pico_sdk-src" (
     set FETCH_FLAG=
 )
 
-echo [1/3] Building RP2040AdvancedBreakoutBoard...
+echo [1/4] Building RP2040AdvancedBreakoutBoard...
 set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
 set PICO_BOARD=pico
 del build\CMakeCache.txt >nul 2>&1
@@ -22,7 +22,7 @@ cmake --build build --config Release --parallel 2>&1
 for %%f in (build\GP2040-CE-NOBD_*_RP2040AdvancedBreakoutBoard.uf2) do copy "%%f" release\ >nul 2>&1
 echo   Done: RP2040AdvancedBreakoutBoard
 
-echo [2/3] Building Pico...
+echo [2/4] Building Pico...
 set GP2040_BOARDCONFIG=Pico
 set PICO_BOARD=pico
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=Pico -DPICO_BOARD=pico -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on 2>&1
@@ -30,13 +30,21 @@ cmake --build build --config Release --parallel 2>&1
 for %%f in (build\GP2040-CE-NOBD_*_Pico.uf2) do copy "%%f" release\ >nul 2>&1
 echo   Done: Pico
 
-echo [3/3] Building PicoW...
+echo [3/4] Building PicoW...
 set GP2040_BOARDCONFIG=PicoW
 set PICO_BOARD=pico_w
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=PicoW -DPICO_BOARD=pico_w -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on 2>&1
 cmake --build build --config Release --parallel 2>&1
 for %%f in (build\GP2040-CE-NOBD_*_PicoW.uf2) do copy "%%f" release\ >nul 2>&1
 echo   Done: PicoW
+
+echo [4/4] Building Haute42COSMOX...
+set GP2040_BOARDCONFIG=Haute42COSMOX
+set PICO_BOARD=pico
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=Haute42COSMOX -DPICO_BOARD=pico -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on 2>&1
+cmake --build build --config Release --parallel 2>&1
+for %%f in (build\GP2040-CE-NOBD_*_Haute42COSMOX.uf2) do copy "%%f" release\ >nul 2>&1
+echo   Done: Haute42COSMOX
 
 REM Pico2 (RP2350) removed — untested on RP2350 hardware, only releasing RP2040 builds
 

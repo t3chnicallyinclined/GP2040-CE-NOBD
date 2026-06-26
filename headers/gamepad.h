@@ -189,6 +189,7 @@ public:
 	GamepadButtonMapping *mapAnalogRSYPos;
 	GamepadButtonMapping *map48WayMode;
 	GamepadButtonMapping *mapFocusMode;
+	GamepadButtonMapping *mapNobdToggle;
 
 	// gamepad specific proxy of debounced buttons --- 1 = active (inverse of the raw GPIO)
 	// see GP2040::debounceGpioGetAll for details
@@ -208,10 +209,13 @@ public:
 
 private:
 	void processHotkeyAction(GamepadHotkey action);
+	void toggleNobd(); // flip nobdSyncDelay on/off and persist — shared by hotkey + pin
 
 	GamepadOptions & options;
 	DpadMode activeDpadMode;
 	bool map48WayModeToggle;
+	bool nobdTogglePinPressed = false; // current state of a NOBD_TOGGLE-mapped pin
+	bool nobdTogglePinPrev = false;    // previous state, for rising-edge detection
 	const HotkeyOptions & hotkeyOptions;
 
 	HotkeyEntry hotkeys[16];
