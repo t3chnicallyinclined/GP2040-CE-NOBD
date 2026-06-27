@@ -450,7 +450,26 @@ The V2 PCB supports a single Maple Bus port (Port A) connected to the local Drea
 |------|-----------|---------|
 | Port A (P1) | GPIO 23 + 24 | Local player — YOUR buttons to Dreamcast |
 
-GPIO 4 and GPIO 5 are now used as additional retro console data lines on the universal RJ45 Retro connector (pins 1 and 8), giving the connector a total of 6 controllable signal lines for supporting various retro console protocols (N64, GameCube, Saturn, PSX/PS2, NES/SNES, Genesis, etc).
+### Universal RJ45 Retro Connector (RJ1)
+
+The RJ45 Retro connector uses the **standard Brook retro-cable pinout** so existing Brook adapter cables (Dreamcast, NES, SNES, etc.) plug in without shorting power into a GPIO. Final locked wiring:
+
+| RJ1 Pin | Net | Function |
+|---------|-----|----------|
+| 1 | GND | Ground (Brook standard) |
+| 2 | — | NC (Brook standard) |
+| 3 | GPIO 23 (1kΩ) | Maple Port A SDCKA |
+| 4 | GPIO 24 (1kΩ) | Maple Port A SDCKB |
+| 5 | — | NC (Brook standard) |
+| 6 | — | NC (Brook standard) |
+| 7 | GPIO 2 (1kΩ) | Retro data |
+| 8 | +5V | 5V rail (Brook standard) |
+
+**Three signal lines** (pins 3, 4, 7) is the Brook retro standard — not the 6 of the earlier custom "all-pins-as-signals" design, which was dropped to gain Brook-cable compatibility (pin 1 must be GND and pin 8 must be +5V or a Brook cable would short power into a GPIO).
+
+What fits natively over RJ1: **Dreamcast** on the Maple pair (2 lines), and serial consoles — **NES/SNES** (3-wire) and single-wire **N64/GameCube** — on the remaining line(s) as firmware adds them. Parallel-protocol consoles (Genesis, PS1/PS2, Saturn) need more lines than a single Brook retro cable carries and are **not** supported through RJ1.
+
+GPIO 4 and GPIO 5 remain available as spare retro/expansion signals, broken out to the **CN11 screw terminal** (3-position: GPIO 4 / GPIO 5 / GND), not on RJ1.
 
 ---
 
