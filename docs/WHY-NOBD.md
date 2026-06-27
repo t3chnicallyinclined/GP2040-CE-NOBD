@@ -76,6 +76,21 @@ On Dreamcast the controller state is read once per VBlank (~16.67ms), synchroniz
 
 ---
 
+## Independent corroboration: someone measured it
+
+This used to be folklore — "old sticks felt more consistent." In 2026, VodkaGobalsky actually measured it: a relay rig pressing two buttons at controlled delays (0–15ms), ~100 samples per interval, across Capcom vs SNK 2 and Street Fighter Alpha 3 on several platforms, with a **direct-to-arcade baseline** as the control.
+
+The result lines up with everything above:
+
+- Games differ in how strict they are (CPS2 / Alpha 3 is far less forgiving than Naomi / CVS2) — but the failure is always the same: your two buttons don't land together, so the game gives you a single button instead of the move.
+- **Older, slower-polling boards registered simultaneous presses more consistently than newer fast ones.** The Xbox 360 TE (~125Hz) outperformed the 1000Hz Brook UFB — and even beat the arcade hardware directly. A slower sampling boundary *groups* two near-simultaneous presses into one report before the game looks; a 1000Hz board exposes the gap.
+
+One honest caveat the test itself couldn't settle: it credits poll rate, but boards at the *same* USB speed still performed differently. So it isn't only polling — some of those boards were already doing input conditioning (debounce, scan timing, grouping) in firmware. We can't say exactly what, because they're closed source. The point holds either way: **slower/older hardware has been quietly grouping your inputs for you all along.** NOBD does the same thing on purpose, in the open, anchored to your press, and stricter than the frame — instead of as an invisible side effect of sampling slowly.
+
+(Source: [VodkaGobalsky's writeup](https://docs.google.com/document/d/1-kShrBweYHEj-UstW-Vx2FJ_OhwDhNQoqMzNtUNMwRw/edit) · [summary thread](https://x.com/LiquidGobalsky/status/2059074285726298367). Community measurement — ~100 samples/condition; poll rate not isolated from debounce.)
+
+---
+
 ## Intent and resolution
 
 The 16ms frame was the game's window for reading intent: anything inside one frame, it treats as one intended moment. Human intent lands at 2 to 8ms. USB's 1ms read is finer than human intent resolves, so it slices one intention into two inputs.
@@ -136,6 +151,9 @@ For single-button actions, the worst case is 5ms of added latency. For simultane
 **Community reports:**
 - [MVC Fighting Collection — Steam Discussions](https://steamcommunity.com/app/2634890/discussions/0/4755326933235585026/)
 - [Shoryuken Archive — MVC2 on Pad](https://archive.supercombo.gg/t/you-think-mvc2-is-hard-to-play-on-pad/133861)
+
+**Independent measurement (simultaneous inputs):**
+- [VodkaGobalsky — fightstick PCB simultaneous-input testing](https://docs.google.com/document/d/1-kShrBweYHEj-UstW-Vx2FJ_OhwDhNQoqMzNtUNMwRw/edit) ([summary thread](https://x.com/LiquidGobalsky/status/2059074285726298367)) — relay-rig test with an arcade baseline; older/slower boards register simultaneous presses more consistently than faster ones. (Community measurement, ~100 samples/condition.)
 
 **NOBD project:**
 - [GP2040-CE NOBD Repository](https://github.com/t3chnicallyinclined/GP2040-CE-NOBD)
