@@ -72,7 +72,7 @@ The controller faithfully reports the stray. Whether the game acts on it depends
 
 On Dreamcast the controller state is read once per VBlank (~16.67ms), synchronized to the frame. Both buttons are already held by the time the console looks, so the gap is invisible. This is in the source: the [KallistiOS SDK](http://gamedev.allusion.net/docs/kos-current/maple_8h_source.html) ties Maple bus DMA to the VBlank interrupt handler, called "on every VBL (~60fps)." Controller read, game logic, and render all fire on the same 60Hz heartbeat.
 
-1000Hz USB removed that frame-synchronized read. Lowering the USB polling rate to 60Hz does not bring it back, because the problem was never frequency, it was **synchronization** to the game's frame, which a USB device cannot see.
+1000Hz USB removed that frame-synchronized read — and it's **both things at once.** The high poll rate **exposes** your finger gap (a slower board would group the two presses into one report — which is exactly why older ~125Hz boards drop fewer; see the measurement below), **and** even a 60Hz USB poll wouldn't fully fix it, because a USB device still can't **synchronize** to the game's frame the way the Dreamcast's read did. Poll rate and frame-sync are both real factors. Lowering poll rate alone just trades latency and still isn't frame-locked — so NOBD groups the presses **deliberately** instead.
 
 ---
 
