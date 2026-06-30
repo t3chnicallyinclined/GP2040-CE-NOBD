@@ -28,4 +28,23 @@ Hardware/
 # Internal branding/marketing (not for public repo)
 branding/
 
+# Proprietary V2 hardware / business docs (belong in private nobd-v2-hardware repo)
+docs/v2-hardware/
+docs/research/
+GP2040-CE-V2-Upwork-Handoff.zip
+GP2040-CE-V2-erc.rpt
+process_whitelist.json
+
+# Local build dirs / test artifacts (not the standard build/ which is already ignored)
+build_p2w/
+build_w6100/
+_test_builds/
+
+# Large external references / datasheets (third-party)
+maplepad_ref/
+VMU/
+AN2606.pdf
+AN2606.txt
+stm32_mouser.pdf
+
 
