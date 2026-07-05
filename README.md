@@ -30,7 +30,7 @@ Proven for MvC2 dashes. The same fix applies to any era fighter that needs two b
 >
 > NOBD started as a fix. It is becoming **the most over-engineered fightstick PCB ever designed**: dual MCU, up to 16 kHz USB, native retro consoles, a 40x-faster LAN target, fully open. Pre-prototype, built in public.
 >
-> **Founding reservations are open: the first 500 lock $150 (retail lands at $199).** No payment now, nothing binding. Show support, or are you just insane enough to want the fastest, most over-engineered fightstick ever made? **[Reserve yours at zero.nobd.net/build →](https://zero.nobd.net/build?utm_source=gp2040-nobd-repo&utm_medium=repo)**
+> **The Founding 100 is open: the first 100 reservations lock $150 (retail lands at $199).** No payment now, nothing binding. Show support, or are you just insane enough to want the fastest, most over-engineered fightstick ever made? **[Reserve yours at zero.nobd.net/build →](https://zero.nobd.net/build?utm_source=gp2040-nobd-repo&utm_medium=repo)**
 
 ---
 
