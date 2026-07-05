@@ -28,7 +28,7 @@ Proven for MvC2 dashes. The same fix applies to any era fighter that needs two b
 
 > ## ⚡ Want the board this firmware was born for?
 >
-> NOBD started as a fix. It is becoming **the most over-engineered fightstick PCB ever designed**: dual MCU, up to 16 kHz USB, native Dreamcast, a 40x-faster LAN target, fully open. Pre-prototype, built in public. No price, no preorder.
+> NOBD started as a fix. It is becoming **the most over-engineered fightstick PCB ever designed**: dual MCU, up to 16 kHz USB, native Dreamcast, a 40x-faster LAN target, fully open. Pre-prototype, built in public.
 >
 > Show support, or are you just insane enough to want the fastest, most over-engineered fightstick ever made? **[Join the founding-tester waitlist at zero.nobd.net →](https://zero.nobd.net/?utm_source=gp2040-nobd-repo&utm_medium=repo)**
 
