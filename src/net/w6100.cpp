@@ -108,6 +108,26 @@ bool w6100_init(unsigned int pin_miso, unsigned int pin_cs, unsigned int pin_scl
     uint8_t lock = SYS_CHIP_LOCK | SYS_NET_LOCK | SYS_PHY_LOCK;
     ctlwizchip(CW_SYS_UNLOCK, &lock);
 
+    // Detect the W6100 BEFORE the blocking DHCP loop below. With no chip on the
+    // SPI bus (any board without Ethernet), MISO floats and VERSIONR reads an
+    // unstable value (0x00, 0xFF, or noise). Read it twice — a real chip returns
+    // the same stable, non-floating value. If absent, release pins 16-20 back to
+    // inputs and bail, so entering Dreamcast mode never hangs ~10s in DHCP on
+    // boards that don't have Ethernet (regression from nobd-20, which had no
+    // Ethernet init in the DC path).
+    uint8_t v1 = (uint8_t)(getVER() >> 8);
+    uint8_t v2 = (uint8_t)(getVER() >> 8);
+    if (v1 != v2 || v1 == 0x00 || v1 == 0xFF) {
+        spi_deinit(w6100_spi);
+        const unsigned int pins[5] = { pin_miso, pin_cs, pin_sclk, pin_mosi, pin_rst };
+        for (int i = 0; i < 5; i++) {
+            gpio_set_function(pins[i], GPIO_FUNC_SIO);
+            gpio_set_dir(pins[i], GPIO_IN);
+            gpio_pull_up(pins[i]);
+        }
+        return false;
+    }
+
     // Set MAC address
     uint8_t mac[6] = {0x00, 0x08, 0xDC, 0xDC, 0x00, 0x01};
     setSHAR(mac);
