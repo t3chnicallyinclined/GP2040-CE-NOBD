@@ -8,6 +8,7 @@
 #include "enums.pb.h"
 #include "storagemanager.h"
 #include "types.h"
+#include "core_bridge.h"
 
 #include "FlashPROM.h"
 #include "CRC32.h"
@@ -299,7 +300,9 @@ void Gamepad::process()
 	}
 
 	// clean up after yourself. nobody likes bad inputs.
-	state.dpad = runSOCDCleaner(resolveSOCDMode(options), state.dpad);
+	// SOCD-once via the DST-proven core (src/input/core); proven behavior-equivalent to
+	// the old runSOCDCleaner by test/socd_equiv.c. This is the single cleaning point.
+	state.dpad = CoreInput::cleanDpad(resolveSOCDMode(options), state.dpad);
 
 	// since analog modes only care about the dpad mode inputs, set the dpad state to digital only dpad values
 	switch (activeDpadMode)
