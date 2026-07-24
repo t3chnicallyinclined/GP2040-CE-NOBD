@@ -167,6 +167,19 @@ endif()
 add_compile_definitions(PICO_STACK_SIZE=0x1000)
 
 add_executable(${PROJECT_NAME}
+# --- vendored DST-proven input core (source of truth: nobd-zero-v2/firmware/core) ---
+src/input/core/analog.c
+src/input/core/buffer.c
+src/input/core/focus.c
+src/input/core/hotkeys.c
+src/input/core/input_pipeline.c
+src/input/core/macros.c
+src/input/core/profiles.c
+src/input/core/remap.c
+src/input/core/reverse.c
+src/input/core/socd.c
+src/input/core/sync_window.c
+src/input/core/turbo.c
 src/platform/main.cpp
 src/platform/gp2040.cpp
 src/platform/gp2040aux.cpp
