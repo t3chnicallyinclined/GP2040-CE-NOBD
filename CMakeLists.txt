@@ -175,43 +175,43 @@ src/input/gamepad.cpp
 src/input/GamepadState.cpp
 src/addonmanager.cpp
 src/playerleds.cpp
-src/drivers/shared/xinput_host.cpp
-src/drivers/shared/xgip_protocol.cpp
-src/drivers/shared/xsm3/excrypt_des.c
-src/drivers/shared/xsm3/excrypt_parve.c
-src/drivers/shared/xsm3/excrypt_sha.c
-src/drivers/shared/xsm3/usbdsec.c
-src/drivers/shared/xsm3/xsm3.c
-src/drivers/astro/AstroDriver.cpp
-src/drivers/egret/EgretDriver.cpp
-src/drivers/hid/HIDDriver.cpp
-src/drivers/keyboard/KeyboardDriver.cpp
-src/drivers/mdmini/MDMiniDriver.cpp
-src/drivers/neogeo/NeoGeoDriver.cpp
-src/drivers/net/NetDriver.cpp
-src/drivers/pcengine/PCEngineDriver.cpp
-src/drivers/ps3/PS3Driver.cpp
-src/drivers/ps4/PS4Auth.cpp
-src/drivers/ps4/PS4AuthUSBListener.cpp
-src/drivers/ps4/PS4Driver.cpp
-src/drivers/psclassic/PSClassicDriver.cpp
-src/drivers/switch/SwitchDriver.cpp
-src/drivers/switchpro/SwitchProDriver.cpp
-src/drivers/xbone/XBOneAuth.cpp
-src/drivers/xbone/XBOneAuthUSBListener.cpp
-src/drivers/xbone/XBOneDriver.cpp
-src/drivers/xboxog/xid/xid_driver.c
-src/drivers/xboxog/xid/xid_gamepad.c
-src/drivers/xboxog/xid/xid_remote.c
-src/drivers/xboxog/xid/xid_steelbattalion.c
-src/drivers/xboxog/xid/xid.c
-src/drivers/xboxog/XboxOriginalDriver.cpp
-src/drivers/xinput/XInputAuth.cpp
-src/drivers/xinput/XInputAuthUSBListener.cpp
-src/drivers/xinput/XInputDriver.cpp
-src/drivers/dreamcast/maple_bus.cpp
-src/drivers/dreamcast/DreamcastDriver.cpp
-src/drivers/dreamcast/DreamcastVMU.cpp
+src/reflect/shared/xinput_host.cpp
+src/reflect/shared/xgip_protocol.cpp
+src/reflect/shared/xsm3/excrypt_des.c
+src/reflect/shared/xsm3/excrypt_parve.c
+src/reflect/shared/xsm3/excrypt_sha.c
+src/reflect/shared/xsm3/usbdsec.c
+src/reflect/shared/xsm3/xsm3.c
+src/reflect/astro/AstroDriver.cpp
+src/reflect/egret/EgretDriver.cpp
+src/reflect/hid/HIDDriver.cpp
+src/reflect/keyboard/KeyboardDriver.cpp
+src/reflect/mdmini/MDMiniDriver.cpp
+src/reflect/neogeo/NeoGeoDriver.cpp
+src/reflect/net/NetDriver.cpp
+src/reflect/pcengine/PCEngineDriver.cpp
+src/reflect/ps3/PS3Driver.cpp
+src/reflect/ps4/PS4Auth.cpp
+src/reflect/ps4/PS4AuthUSBListener.cpp
+src/reflect/ps4/PS4Driver.cpp
+src/reflect/psclassic/PSClassicDriver.cpp
+src/reflect/switch/SwitchDriver.cpp
+src/reflect/switchpro/SwitchProDriver.cpp
+src/reflect/xbone/XBOneAuth.cpp
+src/reflect/xbone/XBOneAuthUSBListener.cpp
+src/reflect/xbone/XBOneDriver.cpp
+src/reflect/xboxog/xid/xid_driver.c
+src/reflect/xboxog/xid/xid_gamepad.c
+src/reflect/xboxog/xid/xid_remote.c
+src/reflect/xboxog/xid/xid_steelbattalion.c
+src/reflect/xboxog/xid/xid.c
+src/reflect/xboxog/XboxOriginalDriver.cpp
+src/reflect/xinput/XInputAuth.cpp
+src/reflect/xinput/XInputAuthUSBListener.cpp
+src/reflect/xinput/XInputDriver.cpp
+src/reflect/dreamcast/maple_bus.cpp
+src/reflect/dreamcast/DreamcastDriver.cpp
+src/reflect/dreamcast/DreamcastVMU.cpp
 src/net/w6100.cpp
 src/interfaces/i2c/i2cdevicebase.cpp
 src/interfaces/i2c/pcf8575/pcf8575.cpp
@@ -236,7 +236,7 @@ src/display/ui/screens/DisplaySaverScreen.cpp
 src/display/ui/screens/SystemErrorScreen.cpp
 src/display/GPGFX.cpp
 src/display/GPGFX_UI.cpp
-src/drivermanager.cpp
+src/reflect/drivermanager.cpp
 src/eventmanager.cpp
 src/layoutmanager.cpp
 src/peripheralmanager.cpp
@@ -290,7 +290,7 @@ ${PROTO_OUTPUT_DIR}/config.pb.c
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_${CMAKE_PROJECT_VERSION}-nobd-${NOBD_RELEASE}_${GP2040_BOARDCONFIG})
 
 # Generate PIO header for Dreamcast Maple Bus
-pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/drivers/dreamcast/maple.pio)
+pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/reflect/dreamcast/maple.pio)
 pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/net/uart_rx.pio)
 
 pico_set_program_name(${PROJECT_NAME} "GP2040-CE-NOBD")
