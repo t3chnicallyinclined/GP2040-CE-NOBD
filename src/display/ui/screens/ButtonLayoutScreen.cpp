@@ -1,4 +1,5 @@
 #include "ButtonLayoutScreen.h"
+#include "faultcapture.h"
 #include "buttonlayouts.h"
 #include "drivermanager.h"
 #include "drivers/ps4/PS4Driver.h"
@@ -419,7 +420,25 @@ void ButtonLayoutScreen::drawScreen() {
 
     // DC mode: normal button layout shown (ISR handles Maple Bus independently)
 
-    getRenderer()->drawText(0, 7, footer);
+    if (FaultCapture::hadFault()) {
+        // Last reset was a HardFault: show the faulting core + PC in place of the
+        // footer so it's visible after the controller reboots.
+        char fbuf[28];
+        snprintf(fbuf, sizeof(fbuf), "FLT C%u %08lX",
+                 (unsigned)FaultCapture::core(), (unsigned long)FaultCapture::faultPC());
+        getRenderer()->drawText(0, 7, std::string(fbuf));
+    } else if (FaultCapture::wasWatchdogReset()) {
+        // Last reset was a lock-up (watchdog fired, no fault captured): show where
+        // each core froze (C0/C1 breadcrumb) plus the I2C timeout count.
+        char fbuf[28];
+        snprintf(fbuf, sizeof(fbuf), "WDT C0:%lu C1:%lu I:%lu",
+                 (unsigned long)FaultCapture::core0Step(),
+                 (unsigned long)FaultCapture::core1Step(),
+                 (unsigned long)FaultCapture::i2cTimeouts());
+        getRenderer()->drawText(0, 7, std::string(fbuf));
+    } else {
+        getRenderer()->drawText(0, 7, footer);
+    }
 }
 
 GPLever* ButtonLayoutScreen::addLever(uint16_t startX, uint16_t startY, uint16_t sizeX, uint16_t sizeY, uint16_t strokeColor, uint16_t fillColor, uint16_t inputType) {

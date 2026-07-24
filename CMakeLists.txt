@@ -170,6 +170,7 @@ add_executable(${PROJECT_NAME}
 src/main.cpp
 src/gp2040.cpp
 src/gp2040aux.cpp
+src/faultcapture.cpp
 src/gamepad.cpp
 src/gamepad/GamepadState.cpp
 src/addonmanager.cpp

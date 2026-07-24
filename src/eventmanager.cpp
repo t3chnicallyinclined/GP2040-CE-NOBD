@@ -47,6 +47,16 @@ void EventManager::triggerEvent(GPEvent* event) {
     delete event;
 }
 
+bool EventManager::hasHandler(GPEventType eventType) {
+    // Lets hot-path callers skip allocating+dispatching an event nobody listens for.
+    for (std::vector<EventEntry>::const_iterator it = eventList.begin(); it != eventList.end(); ++it) {
+        if (it->first == eventType && !it->second.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void EventManager::clearEventHandlers() {
 
 }
