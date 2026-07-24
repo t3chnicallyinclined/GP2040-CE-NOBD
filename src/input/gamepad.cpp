@@ -253,6 +253,25 @@ void Gamepad::reinit()
 	this->setup();
 }
 
+uint32_t Gamepad::socdCleanedGpio() const {
+	// Fall back to the raw debounced mask if dpad mappings aren't set (shouldn't happen
+	// once setup() has run; keeps us crash-safe in release where asserts are stripped).
+	if (!mapDpadUp || !mapDpadDown || !mapDpadLeft || !mapDpadRight) {
+		return debouncedGpio;
+	}
+	// Overwrite exactly the 4 direction pins with the SOCD-cleaned dpad (state.dpad is
+	// post-process). Action pins pass through from debouncedGpio, so a pin-indexed
+	// reflector reflects the SAME cleaned directions USB does -- SOCD once, honored by all.
+	const uint32_t dirMask = mapDpadUp->pinMask | mapDpadDown->pinMask
+	                       | mapDpadLeft->pinMask | mapDpadRight->pinMask;
+	uint32_t g = debouncedGpio & ~dirMask;
+	if (state.dpad & GAMEPAD_MASK_UP)    g |= mapDpadUp->pinMask;
+	if (state.dpad & GAMEPAD_MASK_DOWN)  g |= mapDpadDown->pinMask;
+	if (state.dpad & GAMEPAD_MASK_LEFT)  g |= mapDpadLeft->pinMask;
+	if (state.dpad & GAMEPAD_MASK_RIGHT) g |= mapDpadRight->pinMask;
+	return g;
+}
+
 void Gamepad::process()
 {
 	// NOTE: Inverted X/Y-axis must run before SOCD and Dpad processing

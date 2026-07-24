@@ -479,8 +479,9 @@ void GP2040::run() {
 		// DC mode: ISR handles all commands. Main loop just keeps
 		// lookup table + analog current and does ISR TX cleanup.
 		if (dcMode) {
-			// P1: always read physical buttons into lookup table
-			dcDriver->updateCmd9FromGpio(gamepad->debouncedGpio);
+			// P1: feed the SOCD-cleaned GPIO so the Dreamcast reflects the SAME cleaned
+			// directions as USB (SOCD-once); was debouncedGpio (raw), which skipped SOCD.
+			dcDriver->updateCmd9FromGpio(gamepad->socdCleanedGpio());
 			dcDriver->updateAnalogFromGamepad(gamepad);
 
 			if (dcDriver->ethernetInitialized) {
