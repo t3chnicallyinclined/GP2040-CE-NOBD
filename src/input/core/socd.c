@@ -26,13 +26,14 @@ static buttons_t socd_axis(socd_mode_t mode, buttons_t pressed, buttons_t prev,
             keep = (bit_a == BTN_UP) ? bit_a : 0;    /* Up wins; horizontal -> 0    */
             break;
         case SOCD_LAST_WIN:
-            if (ca && !pa)      *win = bit_a;         /* newest press takes the axis */
-            else if (cb && !pb) *win = bit_b;
+            if (ca && !pa && cb && !pb) *win = 0;     /* both same frame -> no winner (neutral) */
+            else if (ca && !pa)         *win = bit_a; /* newest single press takes the axis */
+            else if (cb && !pb)         *win = bit_b;
             keep = (*win == bit_a ? bit_a : 0) | (*win == bit_b ? bit_b : 0);
             break;
         case SOCD_FIRST_WIN:
-            if (*win != bit_a && *win != bit_b)      /* both same frame -> pick a   */
-                *win = bit_a;
+            /* first press to stand alone wins and holds; a same-frame tie from neutral
+             * has no "first" -> stays neutral (win==0) until one direction stands alone */
             keep = (*win == bit_a ? bit_a : 0) | (*win == bit_b ? bit_b : 0);
             break;
         }
