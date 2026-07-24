@@ -171,8 +171,8 @@ src/main.cpp
 src/gp2040.cpp
 src/gp2040aux.cpp
 src/faultcapture.cpp
-src/gamepad.cpp
-src/gamepad/GamepadState.cpp
+src/input/gamepad.cpp
+src/input/GamepadState.cpp
 src/addonmanager.cpp
 src/playerleds.cpp
 src/drivers/shared/xinput_host.cpp
