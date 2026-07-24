@@ -36,6 +36,9 @@ public:
 	void setup();
 	void reinit();
 	void process();
+	// debouncedGpio with the 4 direction pins overwritten by the SOCD-cleaned dpad, so a
+	// pin-indexed reflector (Dreamcast CMD9) honors SOCD-once exactly like USB does.
+	uint32_t socdCleanedGpio() const;
 	void read();
 	void save();
 
