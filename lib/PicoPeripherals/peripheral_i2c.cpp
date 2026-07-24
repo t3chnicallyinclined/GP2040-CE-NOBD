@@ -1,6 +1,26 @@
 #include <cstdio>
 #include "peripheral_i2c.h"
 
+#include <hardware/structs/watchdog.h>
+#include <pico/error.h>
+
+// Runtime I2C is bounded: a stuck bus (e.g. a glitchy/half-connected OLED) must
+// NOT spin the core forever (that froze the display on its last frame and wedged
+// the controller). On timeout we bump watchdog scratch[2] so the count survives to
+// the next boot, and return the error the callers already check.
+// Must comfortably exceed the largest healthy transfer (a full ~1KB SSD1306
+// framebuffer flush is ~23ms @400kHz / ~12ms @800kHz) so real frames aren't
+// truncated (that made the OLED roll), yet stay well under the 2s watchdog so an
+// infinite bus hang is still caught and the core keeps running.
+#define PERIPHERAL_I2C_TIMEOUT_US 100000  // 100ms
+
+static inline int16_t i2c_note_timeout(int16_t result) {
+    if (result == PICO_ERROR_TIMEOUT) {
+        watchdog_hw->scratch[2]++;
+    }
+    return result;
+}
+
 PeripheralI2C::PeripheralI2C() {
 #ifdef PICO_DEFAULT_I2C_INSTANCE
 
@@ -47,7 +67,7 @@ void PeripheralI2C::setup() {
 int16_t PeripheralI2C::read(uint8_t address, uint8_t *data, uint16_t len, bool isBlock) {
     if ((_exclusiveAddress > -1) && (_exclusiveAddress != address)) return -1;
 
-    int16_t result = i2c_read_blocking(_I2C, address, data, len, isBlock);
+    int16_t result = i2c_note_timeout(i2c_read_timeout_us(_I2C, address, data, len, isBlock, PERIPHERAL_I2C_TIMEOUT_US));
 #ifdef DEBUG_PERIPHERALI2C
     printf("PeripheralI2C::write %d:%d (blocking? %d)\n", address, len, isBlock);
     for (int i = 0; i < len; i++) {
@@ -63,9 +83,9 @@ int16_t PeripheralI2C::readRegister(uint8_t address, uint8_t reg, uint8_t *data,
     if ((_exclusiveAddress > -1) && (_exclusiveAddress != address)) return -1;
 
     int16_t registerCheck;
-    registerCheck = i2c_write_blocking(_I2C, address, &reg, 1, true);
+    registerCheck = i2c_note_timeout(i2c_write_timeout_us(_I2C, address, &reg, 1, true, PERIPHERAL_I2C_TIMEOUT_US));
     if (registerCheck >= 0) {
-        registerCheck = i2c_read_blocking(_I2C, address, data, len, false);
+        registerCheck = i2c_note_timeout(i2c_read_timeout_us(_I2C, address, data, len, false, PERIPHERAL_I2C_TIMEOUT_US));
     }
     return (registerCheck >= 0);
 }
@@ -79,7 +99,7 @@ int16_t PeripheralI2C::write(uint8_t address, uint8_t *data, uint16_t len, bool 
         printf("%02x ", data[i]);
     }
 #endif
-    int16_t result = i2c_write_blocking(_I2C, address, data, len, isBlock);
+    int16_t result = i2c_note_timeout(i2c_write_timeout_us(_I2C, address, data, len, isBlock, PERIPHERAL_I2C_TIMEOUT_US));
 #ifdef DEBUG_PERIPHERALI2C
     printf("\nResult: %d\n", result);
     printf("-----\n");

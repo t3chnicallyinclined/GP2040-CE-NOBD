@@ -6,6 +6,7 @@
 #include "storagemanager.h"
 #include "usbhostmanager.h"
 #include "drivers/dreamcast/DreamcastDriver.h"
+#include <hardware/structs/watchdog.h>
 
 #include "addons/board_led.h"  // Add-Ons
 #include "addons/buzzerspeaker.h"
@@ -54,7 +55,9 @@ void GP2040Aux::setup() {
 void GP2040Aux::run() {
 	while (1) {
 		// Pre, Process, and Post
+		watchdog_hw->scratch[1] = 1; // C1 hang breadcrumb: loop top
 		addons.PreprocessAddons();
+		watchdog_hw->scratch[1] = 2; // C1 hang breadcrumb: ProcessAddons (display + LEDs / OLED I2C write)
 		addons.ProcessAddons();
 
 		// Run auxiliary functions for input driver on Core1

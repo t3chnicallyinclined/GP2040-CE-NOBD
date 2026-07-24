@@ -414,6 +414,7 @@ void GP2040::run() {
 		// Feed the watchdog first thing every iteration. If the loop never
 		// comes back around (a hang), the chip resets within the timeout.
 		watchdog_update();
+		watchdog_hw->scratch[0] = 1; // C0 hang breadcrumb: loop top
 
 		this->getReinitGamepad(gamepad);
 		memcpy(&prevState, &gamepad->state, sizeof(GamepadState));
@@ -467,6 +468,7 @@ void GP2040::run() {
 			dcDriver->process(gamepad);
 			dcDriver->processP2(gamepad);
 		} else {
+			watchdog_hw->scratch[0] = 7; // C0 hang breadcrumb: input driver + USB device task
 			bool processed = inputDriver->process(gamepad);
 			tud_task();
 			addons.PostprocessAddons(processed);
@@ -675,7 +677,7 @@ void GP2040::checkRawState(GamepadState prevState, GamepadState currState) {
         ((currState.dpad & ~prevState.dpad) != 0) ||
         ((currState.buttons & ~prevState.buttons) != 0)
     ) {
-        EventManager::getInstance().triggerEvent(new GPButtonDownEvent((currState.dpad & ~prevState.dpad), (currState.buttons & ~prevState.buttons), (currState.aux & ~prevState.aux)));
+        if (EventManager::getInstance().hasHandler(GP_EVENT_BUTTON_DOWN)) EventManager::getInstance().triggerEvent(new GPButtonDownEvent((currState.dpad & ~prevState.dpad), (currState.buttons & ~prevState.buttons), (currState.aux & ~prevState.aux)));
     }
 
     // buttons released
@@ -684,7 +686,7 @@ void GP2040::checkRawState(GamepadState prevState, GamepadState currState) {
         ((prevState.dpad & ~currState.dpad) != 0) ||
         ((prevState.buttons & ~currState.buttons) != 0)
     ) {
-        EventManager::getInstance().triggerEvent(new GPButtonUpEvent((prevState.dpad & ~currState.dpad), (prevState.buttons & ~currState.buttons), (prevState.aux & ~currState.aux)));
+        if (EventManager::getInstance().hasHandler(GP_EVENT_BUTTON_UP)) EventManager::getInstance().triggerEvent(new GPButtonUpEvent((prevState.dpad & ~currState.dpad), (prevState.buttons & ~currState.buttons), (prevState.aux & ~currState.aux)));
     }
 }
 
@@ -695,7 +697,7 @@ void GP2040::checkProcessedState(GamepadState prevState, GamepadState currState)
         ((currState.dpad & ~prevState.dpad) != 0) ||
         ((currState.buttons & ~prevState.buttons) != 0)
     ) {
-        EventManager::getInstance().triggerEvent(new GPButtonProcessedDownEvent((currState.dpad & ~prevState.dpad), (currState.buttons & ~prevState.buttons), (currState.aux & ~prevState.aux)));
+        if (EventManager::getInstance().hasHandler(GP_EVENT_BUTTON_PROCESSED_DOWN)) EventManager::getInstance().triggerEvent(new GPButtonProcessedDownEvent((currState.dpad & ~prevState.dpad), (currState.buttons & ~prevState.buttons), (currState.aux & ~prevState.aux)));
     }
 
     // buttons released
@@ -704,7 +706,7 @@ void GP2040::checkProcessedState(GamepadState prevState, GamepadState currState)
         ((prevState.dpad & ~currState.dpad) != 0) ||
         ((prevState.buttons & ~currState.buttons) != 0)
     ) {
-        EventManager::getInstance().triggerEvent(new GPButtonProcessedUpEvent((prevState.dpad & ~currState.dpad), (prevState.buttons & ~currState.buttons), (prevState.aux & ~currState.aux)));
+        if (EventManager::getInstance().hasHandler(GP_EVENT_BUTTON_PROCESSED_UP)) EventManager::getInstance().triggerEvent(new GPButtonProcessedUpEvent((prevState.dpad & ~currState.dpad), (prevState.buttons & ~currState.buttons), (prevState.aux & ~currState.aux)));
     }
 
     if (
@@ -715,7 +717,7 @@ void GP2040::checkProcessedState(GamepadState prevState, GamepadState currState)
         (currState.lt != prevState.lt) ||
         (currState.rt != prevState.rt)
     ) {
-        EventManager::getInstance().triggerEvent(new GPAnalogProcessedMoveEvent(currState.lx, currState.ly, currState.rx, currState.ry, currState.lt, currState.rt));
+        if (EventManager::getInstance().hasHandler(GP_EVENT_ANALOG_PROCESSED_MOVE)) EventManager::getInstance().triggerEvent(new GPAnalogProcessedMoveEvent(currState.lx, currState.ly, currState.rx, currState.ry, currState.lt, currState.rt));
     }
 }
 
