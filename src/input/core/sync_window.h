@@ -39,6 +39,9 @@ typedef struct {
     bool      started;              /* has step() run yet (replaces Python's now=-1 sentinel) */
     uint32_t  deadline;
     uint32_t  last_now;
+    buttons_t pending_release;      /* release_debounce: bits whose release is waiting out the window */
+    bool      release_open;         /* a release window is counting down */
+    uint32_t  release_deadline;
 } sync_window_t;
 
 void      sync_window_init(sync_window_t *s, uint32_t window, bool release_debounce);

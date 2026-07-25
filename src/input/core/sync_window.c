@@ -20,6 +20,9 @@ void sync_window_init(sync_window_t *s, uint32_t window, bool release_debounce)
     s->started = false;
     s->deadline = 0;
     s->last_now = 0;
+    s->pending_release = 0;
+    s->release_open = false;
+    s->release_deadline = 0;
 }
 
 buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw)
@@ -27,10 +30,29 @@ buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw)
     assert(s != NULL);
     assert(!s->started || now > s->last_now);    /* time must strictly advance */
 
-    /* releases take effect immediately (release-debounce off by default):
-     * keep only committed bits that are still held. */
-    if (!s->release_debounce)
-        s->committed &= raw;
+    /* releases: immediate by default; with release_debounce, a release waits out the
+     * window symmetrically to a press (so a release co-registers/debounces like a press,
+     * and a re-press inside the window cancels it). Mirrors V1 syncGpioGetAll(). */
+    if (!s->release_debounce) {
+        s->committed &= raw;                          /* keep only bits still held */
+    } else {
+        buttons_t just_released = s->committed & ~raw;/* committed but no longer held */
+        if (just_released) {
+            if (!s->release_open) {
+                s->release_open = true;
+                s->release_deadline = now + s->window;
+            }
+            s->pending_release |= just_released;
+        }
+        s->pending_release &= ~raw;                   /* a re-press cancels the pending release */
+        if (s->pending_release && now >= s->release_deadline) {
+            s->committed &= ~s->pending_release;
+            s->pending_release = 0;
+            s->release_open = false;
+        }
+        if (!s->pending_release)
+            s->release_open = false;
+    }
 
     /* a new press (not committed, not already pending) opens or joins a window */
     buttons_t fresh = raw & ~s->committed & ~s->pending;
@@ -55,6 +77,8 @@ buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw)
      * never pending state without an open window. */
     assert(!(s->open && now >= s->deadline));
     assert(s->pending == 0 || s->open);
+    assert(!(s->release_open && now >= s->release_deadline)); /* release window never past its deadline */
+    assert(s->pending_release == 0 || s->release_open);       /* no pending release without an open window */
     return s->committed;
 }
 
