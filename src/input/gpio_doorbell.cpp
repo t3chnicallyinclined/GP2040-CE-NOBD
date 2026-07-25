@@ -3,6 +3,7 @@
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
 #include "hardware/sync.h"   // save_and_disable_interrupts / restore_interrupts
+#include "latency_probe.h"
 
 namespace {
 
@@ -12,6 +13,7 @@ volatile bool     g_changed = false;
 // Runs in IO_IRQ_BANK0 context. The SDK's default GPIO handler acknowledges the pin IRQ
 // before invoking this callback, so we only record the event. RAM-pinned (hot ISR).
 void __not_in_flash_func(doorbell_cb)(uint /*gpio*/, uint32_t /*events*/) {
+    LatencyProbe::edge();   // timestamp the raw button edge, first thing
     g_edges++;
     g_changed = true;
 }

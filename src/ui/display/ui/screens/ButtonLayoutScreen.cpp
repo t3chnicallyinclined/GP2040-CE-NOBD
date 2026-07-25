@@ -1,5 +1,6 @@
 #include "ButtonLayoutScreen.h"
 #include "faultcapture.h"
+#include "input/latency_probe.h"
 #include "buttonlayouts.h"
 #include "drivermanager.h"
 #include "drivers/ps4/PS4Driver.h"
@@ -437,7 +438,15 @@ void ButtonLayoutScreen::drawScreen() {
                  (unsigned long)FaultCapture::i2cTimeouts());
         getRenderer()->drawText(0, 7, std::string(fbuf));
     } else {
-        getRenderer()->drawText(0, 7, footer);
+        // Latency HUD: raw button edge -> USB-report device response, in microseconds
+        // (min/avg/max) + sample count. min..max IS the device jitter -- the poll wait is
+        // excluded. (Replaces the input-history footer while we measure.)
+        uint32_t lmin, lavg, lmax, lcnt;
+        LatencyProbe::stats(lmin, lavg, lmax, lcnt);
+        char lbuf[28];
+        snprintf(lbuf, sizeof(lbuf), "us %lu/%lu/%lu N%lu",
+                 (unsigned long)lmin, (unsigned long)lavg, (unsigned long)lmax, (unsigned long)lcnt);
+        getRenderer()->drawText(0, 7, std::string(lbuf));
     }
 }
 

@@ -6,6 +6,7 @@
 #include "drivers/xinput/XInputDriver.h"
 #include "drivers/shared/driverhelper.h"
 #include "storagemanager.h"
+#include "input/latency_probe.h"
 
 #define USB_SETUP_DEVICE_TO_HOST 0x80
 #define USB_SETUP_HOST_TO_DEVICE 0x00
@@ -340,6 +341,7 @@ bool XInputDriver::process(Gamepad * gamepad) {
             usbd_edpt_claim(0, endpoint_in);								// Take control of IN endpoint
             usbd_edpt_xfer(0, endpoint_in, (uint8_t *)&xinputReport, sizeof(XInputReport)); // Send report buffer
             usbd_edpt_release(0, endpoint_in);								// Release control of IN endpoint
+            LatencyProbe::report();										// raw edge -> report-loaded delta
             memcpy(last_report, &xinputReport, sizeof(XInputReport)); // save if we sent it
             reportSent = true;
         }
