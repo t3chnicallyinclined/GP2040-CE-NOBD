@@ -39,9 +39,16 @@ namespace GpioDoorbell {
     // (cheap, preserves state); active=false => the ISR passes pins straight through.
     void configSync(bool active, uint32_t window, bool releaseDebounce);
 
-    // The current sync-committed pressed mask. The loop reads this into debouncedGpio so the whole
-    // system (USB report, display, addons) honors the SAME ISR-owned co-registration -- single
-    // owner, no divergence. Also steps the window with the current pins (catches a button held at
-    // boot before any edge, and serves as a poll-backup to the event-driven commit).
+    // The current committed pressed mask (post sync/debounce). The loop reads this into
+    // debouncedGpio so the whole system (USB report, display, addons) honors the SAME ISR-owned
+    // front stage -- single owner, no divergence. Also steps the stage with the current pins
+    // (catches a button held at boot before any edge, and backstops the event-driven commit).
     uint32_t committed();
+
+    // Stage 3: the doorbell also owns per-pin leading-edge debounce (the ship-tier "fire on first
+    // edge" -- accept a change immediately, lock the pin out for delayMs). Same algorithm as the
+    // loop's debounceGpioGetAll(), just run on the EDGE, so a clean press lands in ~1us not ~70us.
+    // Mutually exclusive with the sync window (the loop enables exactly one). active=false =>
+    // pins pass straight through.
+    void configDebounce(bool active, uint32_t delayMs);
 }

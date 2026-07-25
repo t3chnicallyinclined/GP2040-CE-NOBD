@@ -10,10 +10,15 @@
 #include "input/gpio_doorbell.h"
 #include "pico.h"              // __not_in_flash_func (RAM-pin the ISR fast path)
 #include "hardware/gpio.h"    // gpio_get_all (read the pins straight, in the edge ISR)
+#include <cstddef>            // offsetof (split report content from the measurement-stamp region)
 
 // NOBD hot-buffer hook exposed from the vendored TinyUSB rp2040 driver (dcd_rp2040.c):
 // the DPRAM buffer the SIE sends from, so we can freshen the staged report in place.
 extern "C" uint8_t* dcd_rp2040_ep_dpram(uint8_t ep_addr);
+
+// Set by the main loop (gp2040.cpp) each frame: did any addon modify the report? The ISR fast
+// path bypasses addons, so its gate disarms when this is true. See GP2040::run().
+extern volatile bool g_teAddonTouchedInputs;
 
 #define USB_SETUP_DEVICE_TO_HOST 0x80
 #define USB_SETUP_HOST_TO_DEVICE 0x00
@@ -61,6 +66,9 @@ namespace {
     // pin masks per XInput bit, snapshotted from the gamepad mapping at first process()
     uint32_t s_pmUp, s_pmDown, s_pmLeft, s_pmRight, s_pmStart, s_pmBack, s_pmLS, s_pmRS;
     uint32_t s_pmLB, s_pmRB, s_pmHome, s_pmA, s_pmB, s_pmX, s_pmY, s_pmL2, s_pmR2;
+    // Stage 2 (combinational): axis invert + 4-way, published by the loop's gate before it compares
+    // and before the ISR next runs. bool read/write is atomic on M0+, so no lock needed.
+    volatile bool s_invX = false, s_invY = false, s_fourWay = false;
 }
 
 // The straight pin->button map, shared by the ISR (fast path) and the loop (safety gate) so the
@@ -78,6 +86,22 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
     if (p & s_pmBack)  b1 |= XBOX_MASK_BACK;
     if (p & s_pmLS)    b1 |= XBOX_MASK_LS;
     if (p & s_pmRS)    b1 |= XBOX_MASK_RS;
+    // axis invert (Stage 2) -- swap the direction bits. The loop's process() inverts state.dpad
+    // before mapping; on a straight digital map that is bit-for-bit identical to swapping here.
+    if (s_invY) {   // UP <-> DOWN
+        const uint8_t u = b1 & XBOX_MASK_UP, d = b1 & XBOX_MASK_DOWN;
+        b1 = (b1 & ~(XBOX_MASK_UP | XBOX_MASK_DOWN)) | (u ? XBOX_MASK_DOWN : 0) | (d ? XBOX_MASK_UP : 0);
+    }
+    if (s_invX) {   // LEFT <-> RIGHT
+        const uint8_t l = b1 & XBOX_MASK_LEFT, r = b1 & XBOX_MASK_RIGHT;
+        b1 = (b1 & ~(XBOX_MASK_LEFT | XBOX_MASK_RIGHT)) | (l ? XBOX_MASK_RIGHT : 0) | (r ? XBOX_MASK_LEFT : 0);
+    }
+    // 4-way / 8-way filter (Stage 2). The dpad bits are 1<<0..3 in BOTH XBOX_MASK and GAMEPAD_MASK,
+    // so b1's low nibble IS a logical dpad -- run the loop's own pure filterToFourWayMode() on it.
+    // Same code the loop calls, so exact by construction. Order matches process(): invert, then 4-way.
+    if (s_fourWay) {
+        b1 = (uint8_t)((b1 & 0xF0u) | filterToFourWayMode((uint8_t)(b1 & 0x0Fu)));
+    }
     b2 = 0;
     if (p & s_pmLB)   b2 |= XBOX_MASK_LB;
     if (p & s_pmRB)   b2 |= XBOX_MASK_RB;
@@ -104,7 +128,21 @@ static void __not_in_flash_func(xinput_fastpath)(uint32_t committed) {
     dpram[3] = b2;   // XInputReport.buttons2
     dpram[4] = lt;   // XInputReport.lt
     dpram[5] = rt;   // XInputReport.rt
+#if TE_LATENCY_MEASURE
+    // MEASURE (compiled out of production): stamp the device edge time (T0) into the report's reserved
+    // region so a passive USB capture reads, per report, WHEN the device saw the edge -> correlate
+    // against the host-receive time with no external rig. The ISR is the SOLE writer of [14..19]; the
+    // loop neither diffs nor overwrites it (see process()), so there is no cross-writer race. Layout:
+    //   [14] = 0x7E marker  (host discards any foreign 20-byte report on the bus)
+    //   [15] = 0
+    //   [16..19] = T0, little-endian uint32 (device microseconds)
+    // T0 sits on the 4-aligned offset 16 so it ships as ONE 32-bit store the USB SIE can never read
+    // half-updated -- a byte-by-byte write to 14..17 could tear and produce a garbage edge time.
+    dpram[14] = 0x7E;
+    dpram[15] = 0x00;
+    *(volatile uint32_t*)(dpram + 16) = LatencyProbe::edgeTime();
     LatencyProbe::report();   // edge/deadline -> staged, in the ISR
+#endif
 }
 
 // Move to Proto Enums
@@ -202,6 +240,7 @@ static bool xinput_xfer_callback(uint8_t rhport, uint8_t ep_addr, xfer_result_t 
     // buffer we hand back IS the DPRAM (a self-copy -- harmless), so TinyUSB keeps managing the
     // DATA0/1 toggle. Paced by the host's 1ms poll, so no flood.
     else if (ep_addr == endpoint_in && tud_ready()) {
+        LatencyProbe::wire();   // T2: this report just shipped on the wire -- closes edge->wire
         uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);
         if (dpram != nullptr && !usbd_edpt_busy(0, endpoint_in)) {
             usbd_edpt_claim(0, endpoint_in);
@@ -449,21 +488,33 @@ bool XInputDriver::process(Gamepad * gamepad) {
     // Re-checked every loop, so a mode switch (hotkey/toggle) flips it safely. This gate IS the
     // harness we widen, one DST-proven stage at a time, toward "all inputs on the 1us path".
     if (s_fastReady) {
-        uint8_t o1, o2, olt, ort;
-        xinput_straight(Storage::getInstance().GetGamepad()->debouncedGpio, o1, o2, olt, ort);
         const GamepadOptions& opt = Storage::getInstance().getGamepadOptions();
-        const bool mappingStraight  = (xinputReport.buttons1 == o1) && (xinputReport.buttons2 == o2)
-                                    && (xinputReport.lt == olt) && (xinputReport.rt == ort);
-        // Stage 4 widened the envelope: sync-on is now handled BY the ISR (the doorbell owns the
-        // window), so it no longer blocks. Debounce is the last timing stage still loop-only --
-        // it's active only when sync is off and a delay is set, and until Stage 3 moves it into
-        // the ISR the raw read would bypass it, so it still disarms.
-        const bool debounceActive = (opt.nobdSyncDelay == 0) && (opt.debounceDelay > 0);
+        Gamepad* gp = Storage::getInstance().GetGamepad();
+        s_invX = opt.invertXAxis;   // publish transform config to the ISR BEFORE we compare or it runs
+        s_invY = opt.invertYAxis;
+        s_fourWay = gp->getFourWayModeActive();
+        uint8_t o1, o2, olt, ort;
+        xinput_straight(gp->debouncedGpio, o1, o2, olt, ort);
+        const bool mappingStraight = (xinputReport.buttons1 == o1) && (xinputReport.buttons2 == o2)
+                                   && (xinputReport.lt == olt) && (xinputReport.rt == ort);
+
+        // PRODUCTION SAFETY -- PROACTIVE whitelist. Arm the ISR ONLY inside the config envelope it
+        // provably covers, so a partially-covered mode (e.g. 4-way: cardinals match but a diagonal
+        // wouldn't) can never emit even ONE wrong frame before the reactive check would notice.
+        // Every transform the ISR does NOT yet handle disarms it here, BEFORE any input can diverge;
+        // anything outside the whitelist falls back to the loop = the incumbent GP2040 path (known-
+        // good). Invert, sync, debounce AND 4-way are handled in the ISR now, so they're absent here.
+        // mappingStraight is the final backstop for anything unforeseen. Still gated (not yet in the
+        // ISR): analog-dpad (needs stick bytes), non-bypass SOCD (stateful), non-gamepad device
+        // types, and any addon that touched the report.
         const bool gamepadType = (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_WHEEL)
                               && (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GUITAR)
                               && (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_DRUM);
-        GpioDoorbell::registerFastPath(
-            (mappingStraight && !debounceActive && gamepadType) ? &xinput_fastpath : nullptr);
+        const bool digitalDpad = (gp->getActiveDpadMode() == DpadMode::DPAD_MODE_DIGITAL);
+        const bool socdBypass  = (Gamepad::resolveSOCDMode(opt) == SOCD_MODE_BYPASS);
+        const bool eligible = mappingStraight && gamepadType
+                           && digitalDpad && socdBypass && !g_teAddonTouchedInputs;
+        GpioDoorbell::registerFastPath(eligible ? &xinput_fastpath : nullptr);
     }
 
     bool reportSent = false;
@@ -472,8 +523,20 @@ bool XInputDriver::process(Gamepad * gamepad) {
     // the IN endpoint is free, else overwrite the report already staged in DPRAM in place, so
     // the next host poll reads the FRESHEST state instead of the stale one it was holding.
     // Neither path waits for the endpoint to free. The probe now times raw edge -> endpoint.
-    if ( memcmp(last_report, &xinputReport, sizeof(XInputReport)) != 0) {
+    // Diff and freshen on the report CONTENT only (bytes 0..13). The reserved region [14..19] is not
+    // report state -- treating it as content would re-send on every change to it and let the loop
+    // clobber it. In measurement builds that region is the ISR's edge-time stamp, so content-only
+    // keeps the two writers from racing; in production it is simply unused.
+    if ( memcmp(last_report, &xinputReport, offsetof(XInputReport, _reserved)) != 0) {
         if ( tud_ready() && (endpoint_in != 0) && (!usbd_edpt_busy(0, endpoint_in)) ) {
+#if TE_LATENCY_MEASURE
+            // Rare path (endpoint idle): TinyUSB copies the whole 20-byte buffer, so carry the ISR's
+            // live stamp forward rather than shipping this RAM copy's stale reserved bytes.
+            uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);
+            if (dpram != nullptr)
+                memcpy(xinputReport._reserved, dpram + offsetof(XInputReport, _reserved),
+                       sizeof(xinputReport._reserved));
+#endif
             usbd_edpt_claim(0, endpoint_in);
             usbd_edpt_xfer(0, endpoint_in, (uint8_t *)&xinputReport, sizeof(XInputReport));
             usbd_edpt_release(0, endpoint_in);
@@ -483,7 +546,8 @@ bool XInputDriver::process(Gamepad * gamepad) {
         } else if ( tud_ready() && (endpoint_in != 0) ) {
             uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);   // report already staged for the SIE
             if (dpram != nullptr) {
-                memcpy(dpram, &xinputReport, sizeof(XInputReport)); // freshen it in place
+                // Freshen CONTENT in place; leave [14..19] to the ISR so its edge stamp survives.
+                memcpy(dpram, &xinputReport, offsetof(XInputReport, _reserved));
                 memcpy(last_report, &xinputReport, sizeof(XInputReport));
                 LatencyProbe::report();
                 reportSent = true;

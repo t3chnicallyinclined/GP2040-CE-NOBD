@@ -29,6 +29,9 @@ volatile bool     s_syncActive  = false;   // false => pins pass straight throug
 volatile uint32_t s_committed   = 0;       // latest committed pressed mask (loop reads this)
 int               s_alarm       = -1;      // claimed hardware alarm for the commit deadline
 bool              s_alarmInited = false;
+volatile bool     s_debounceActive = false;                    // Stage 3: leading-edge debounce
+uint32_t          s_debounceDelay  = 0;                        // lockout ms
+uint32_t          s_debounceTime[NUM_BANK0_GPIOS] = {0};       // per-pin last accepted-edge ms
 
 inline uint32_t now_ms() { return to_ms_since_boot(get_absolute_time()); }
 
@@ -52,6 +55,26 @@ bool __not_in_flash_func(stepSync)() {
         next = (pc && rc) ? (pc < rc ? pc : rc) : (pc ? pc : rc);   // nearest pending deadline
         changed = (c != s_committed);
         s_committed = c;
+        restore_interrupts(save);
+    } else if (s_debounceActive) {
+        // Leading-edge per-pin debounce: accept a pin's change immediately, then lock that pin out
+        // for delayMs (identical algorithm to GP2040's debounceGpioGetAll, but run on the edge).
+        // Only walks pins that actually changed. No alarm needed -- a change that settles DURING a
+        // lockout (no fresh edge) is picked up by the committed()/loop poll, exactly as before.
+        const uint32_t now = now_ms();
+        const uint32_t save = save_and_disable_interrupts();
+        const uint32_t before = s_committed;
+        uint32_t chg = (raw ^ before) & s_buttonMask;
+        while (chg) {
+            const uint pin = (uint)__builtin_ctz(chg);
+            if ((uint32_t)(now - s_debounceTime[pin]) > s_debounceDelay) {
+                s_committed ^= (1u << pin);
+                s_debounceTime[pin] = now;
+            }
+            chg &= (chg - 1);
+        }
+        c = s_committed;
+        changed = (c != before);
         restore_interrupts(save);
     } else {
         c = raw;                                 // straight through: the 1us floor path
@@ -123,6 +146,13 @@ void configSync(bool active, uint32_t window, bool releaseDebounce) {
     s_sync.window          = w;               // dynamic, like the incumbent re-read each call
     s_sync.release_debounce = releaseDebounce;
     s_syncActive           = active;
+    restore_interrupts(save);
+}
+
+void configDebounce(bool active, uint32_t delayMs) {
+    const uint32_t save = save_and_disable_interrupts();
+    s_debounceDelay  = delayMs;
+    s_debounceActive = active;
     restore_interrupts(save);
 }
 
