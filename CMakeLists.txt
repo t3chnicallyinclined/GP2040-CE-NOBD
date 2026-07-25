@@ -187,6 +187,7 @@ src/platform/faultcapture.cpp
 src/input/gamepad.cpp
 src/input/GamepadState.cpp
 src/input/core_bridge.cpp
+src/input/gpio_doorbell.cpp
 src/platform/addonmanager.cpp
 src/ui/playerleds.cpp
 src/reflect/shared/xinput_host.cpp
