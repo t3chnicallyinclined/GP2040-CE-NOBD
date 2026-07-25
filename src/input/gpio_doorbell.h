@@ -26,10 +26,22 @@ namespace GpioDoorbell {
     // is seeing presses without touching the loop.
     uint32_t edgeCount();
 
-    // Register a RAM-pinned callback run INSIDE the edge ISR -- the "fast path" (rung 2). On
-    // every button edge the driver rebuilds + stages its report immediately, instead of waiting
-    // for the main loop to lap back around to the read (the loop-cycle latency the bench proved
-    // dominant: min 1us but avg 70us / max 1000us). fn must be short, RAM-pinned, and touch only
-    // ISR-safe state. Pass nullptr to disarm. Single slot (one driver owns the fast path).
-    void registerFastPath(void (*fn)());
+    // Register a RAM-pinned callback run INSIDE the edge/timer ISRs -- the "fast path" (rung 2).
+    // It is handed the sync-committed pressed mask and formats+stages its report immediately,
+    // instead of waiting for the main loop to lap back to the read. fn must be short, RAM-pinned,
+    // and touch only ISR-safe state. Pass nullptr to disarm. Single slot (one driver owns it).
+    void registerFastPath(void (*fn)(uint32_t committed));
+
+    // ---- Stage 4: the doorbell owns the NOBD sync window --------------------------------------
+    // The sync window (co-registration front stage) runs here now, driven by the edge ISR + a
+    // one-pulse hardware alarm, so a commit fires exactly at its deadline with the CPU asleep --
+    // instead of the loop noticing it ~50us later. Configure it from the loop each iteration
+    // (cheap, preserves state); active=false => the ISR passes pins straight through.
+    void configSync(bool active, uint32_t window, bool releaseDebounce);
+
+    // The current sync-committed pressed mask. The loop reads this into debouncedGpio so the whole
+    // system (USB report, display, addons) honors the SAME ISR-owned co-registration -- single
+    // owner, no divergence. Also steps the window with the current pins (catches a button held at
+    // boot before any edge, and serves as a poll-backup to the event-driven commit).
+    uint32_t committed();
 }

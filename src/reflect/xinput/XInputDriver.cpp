@@ -90,20 +90,21 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
     rt = (p & s_pmR2) ? 0xFFu : 0u;
 }
 
-static void __not_in_flash_func(xinput_fastpath)() {
+static void __not_in_flash_func(xinput_fastpath)(uint32_t committed) {
     if (!s_fastReady) return;
     uint8_t* dpram = dcd_rp2040_ep_dpram(s_fastEpIn);
     if (dpram == nullptr) return;
 
-    // Active-low pins, inverted to pressed=1 and masked to the mapped set -- identical to the
-    // loop's `~gpio_get_all()` (see gp2040.cpp readSyncGpio). Stateless: pure function of pins.
+    // The doorbell already read the pins, applied active-low, and ran the sync window: `committed`
+    // is the co-registered pressed mask. Format it straight into the staged report. (When sync is
+    // off, committed == the raw pressed mask, so this is still the pure ~1us straight map.)
     uint8_t b1, b2, lt, rt;
-    xinput_straight((~gpio_get_all()) & s_fastAllBtn, b1, b2, lt, rt);
+    xinput_straight(committed, b1, b2, lt, rt);
     dpram[2] = b1;   // XInputReport.buttons1
     dpram[3] = b2;   // XInputReport.buttons2
     dpram[4] = lt;   // XInputReport.lt
     dpram[5] = rt;   // XInputReport.rt
-    LatencyProbe::report();   // edge->staged: now the whole path lives in this one ISR
+    LatencyProbe::report();   // edge/deadline -> staged, in the ISR
 }
 
 // Move to Proto Enums
@@ -453,12 +454,16 @@ bool XInputDriver::process(Gamepad * gamepad) {
         const GamepadOptions& opt = Storage::getInstance().getGamepadOptions();
         const bool mappingStraight  = (xinputReport.buttons1 == o1) && (xinputReport.buttons2 == o2)
                                     && (xinputReport.lt == olt) && (xinputReport.rt == ort);
-        const bool timingPassthrough = (opt.debounceDelay == 0) && (opt.nobdSyncDelay == 0);
+        // Stage 4 widened the envelope: sync-on is now handled BY the ISR (the doorbell owns the
+        // window), so it no longer blocks. Debounce is the last timing stage still loop-only --
+        // it's active only when sync is off and a delay is set, and until Stage 3 moves it into
+        // the ISR the raw read would bypass it, so it still disarms.
+        const bool debounceActive = (opt.nobdSyncDelay == 0) && (opt.debounceDelay > 0);
         const bool gamepadType = (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_WHEEL)
                               && (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GUITAR)
                               && (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_DRUM);
         GpioDoorbell::registerFastPath(
-            (mappingStraight && timingPassthrough && gamepadType) ? &xinput_fastpath : nullptr);
+            (mappingStraight && !debounceActive && gamepadType) ? &xinput_fastpath : nullptr);
     }
 
     bool reportSent = false;
