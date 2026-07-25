@@ -437,17 +437,27 @@ void ButtonLayoutScreen::drawScreen() {
                  (unsigned long)FaultCapture::core1Step(),
                  (unsigned long)FaultCapture::i2cTimeouts());
         getRenderer()->drawText(0, 7, std::string(fbuf));
-    } else {
-        // Latency HUD: raw button edge -> USB-report device response, in microseconds
-        // (min/avg/max) + sample count. min..max IS the device jitter -- the poll wait is
-        // excluded. (Replaces the input-history footer while we measure.)
+    }
+#if TE_LATENCY_MEASURE
+    else {
+        // Latency HUD (measurement builds only): raw button edge -> USB-report device response, in
+        // microseconds (min/avg/max) + sample count. min..max IS the device jitter -- the poll wait
+        // is excluded. Replaces the footer while we measure; compiled out of production.
         uint32_t lmin, lavg, lmax, lcnt;
         LatencyProbe::stats(lmin, lavg, lmax, lcnt);
+        uint32_t wmin, wavg, wmax, wcnt;
+        LatencyProbe::wireStats(wmin, wavg, wmax, wcnt);
         char lbuf[28];
-        snprintf(lbuf, sizeof(lbuf), "us %lu/%lu/%lu N%lu",
-                 (unsigned long)lmin, (unsigned long)lavg, (unsigned long)lmax, (unsigned long)lcnt);
+        // D = edge->build (device compute, poll excluded). W = edge->wire (TRUE controller latency
+        // incl. the poll) -- W's AVG is the ~500us floor to compare against other boards, on the wire.
+        snprintf(lbuf, sizeof(lbuf), "D %lu/%lu/%lu",
+                 (unsigned long)lmin, (unsigned long)lavg, (unsigned long)lmax);
+        getRenderer()->drawText(0, 6, std::string(lbuf));
+        snprintf(lbuf, sizeof(lbuf), "W %lu/%lu/%lu N%lu",
+                 (unsigned long)wmin, (unsigned long)wavg, (unsigned long)wmax, (unsigned long)wcnt);
         getRenderer()->drawText(0, 7, std::string(lbuf));
     }
+#endif
 }
 
 GPLever* ButtonLayoutScreen::addLever(uint16_t startX, uint16_t startY, uint16_t sizeX, uint16_t sizeY, uint16_t strokeColor, uint16_t fillColor, uint16_t inputType) {

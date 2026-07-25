@@ -330,6 +330,11 @@ void __not_in_flash_func(GP2040::syncGpioGetAll)() {
 	                                             nobdSyncDelay, releaseDebounce, getMillis());
 }
 
+// Set each loop: did any addon (turbo/macro/...) modify the report this frame? The XInput ISR
+// fast path bypasses the addons, so it MUST disarm when this is true. Read by the driver's gate.
+// Future-proof -- catches every report-touching addon without enumerating them. See run().
+volatile bool g_teAddonTouchedInputs = false;
+
 void GP2040::run() {
 	Gamepad * gamepad = Storage::getInstance().GetGamepad();
 	Gamepad * processedGamepad = Storage::getInstance().GetProcessedGamepad();
@@ -410,10 +415,16 @@ void GP2040::run() {
 			// the commit fires from a hardware alarm (deterministic, CPU asleep), not the loop.
 			const GamepadOptions& o = Storage::getInstance().getGamepadOptions();
 			GpioDoorbell::configSync(true, o.nobdSyncDelay, o.nobdReleaseDebounce);
+			GpioDoorbell::configDebounce(false, 0);      // sync owns the front stage
 			gamepad->debouncedGpio = GpioDoorbell::committed();
 		} else {
-			GpioDoorbell::configSync(false, 0, false);   // ISR passes pins straight through
-			debounceGpioGetAll();
+			// Stage 3: the doorbell/ISR owns leading-edge debounce now (replaces the loop poll's
+			// debounceGpioGetAll -- a clean press lands in ~1us instead of ~70us). delay==0 => the
+			// ISR passes pins straight through, same as before.
+			const uint32_t dd = Storage::getInstance().getGamepadOptions().debounceDelay;
+			GpioDoorbell::configSync(false, 0, false);
+			GpioDoorbell::configDebounce(dd > 0, dd);
+			gamepad->debouncedGpio = GpioDoorbell::committed();
 		}
 
 		gamepad->read();
@@ -438,7 +449,12 @@ void GP2040::run() {
 
 		gamepad->process();
 
+		// Snapshot the report across the addons: if any addon changed it (turbo, macro, ...), flag
+		// it so the ISR fast path -- which bypasses addons -- disarms and this loop path owns the
+		// report. Proactive: set BEFORE the driver's gate runs below, so no wrong frame can slip out.
+		const GamepadState _tewPreAddon = gamepad->state;
 		addons.ProcessAddons();
+		g_teAddonTouchedInputs = (memcmp(&_tewPreAddon, &gamepad->state, sizeof(GamepadState)) != 0);
 
 		checkProcessedState(processedGamepad->state, gamepad->state);
 

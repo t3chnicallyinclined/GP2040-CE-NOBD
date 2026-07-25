@@ -166,6 +166,13 @@ endif()
 # We want a larger stack of 4kb per core instead of the default 2kb
 add_compile_definitions(PICO_STACK_SIZE=0x1000)
 
+# Latency instrumentation (on-die probe + report edge-time stamp + OLED D/W HUD). OFF ships the
+# pure fast path; -DTE_LATENCY_MEASURE=ON builds a measurement image. See docs/latency-testing/.
+option(TE_LATENCY_MEASURE "Compile in latency measurement instrumentation" OFF)
+if(TE_LATENCY_MEASURE)
+  add_compile_definitions(TE_LATENCY_MEASURE=1)
+endif()
+
 add_executable(${PROJECT_NAME}
 # --- vendored DST-proven input core (source of truth: nobd-zero-v2/firmware/core) ---
 src/input/core/analog.c

@@ -1,22 +1,51 @@
 /*
- * latency_probe -- instrument-free device-side latency + jitter measurement.
+ * latency_probe -- instrument-free latency + jitter measurement, from the RP2040's own clock.
  *
- * edge() is called the instant a button changes (first thing in the GPIO doorbell ISR);
- * report() is called the instant that state is loaded into the USB IN endpoint. The delta
- * is EXACTLY the device's contribution -- raw edge -> report-ready -- with the 1 ms host
- * poll wait excluded. Tracked as min / avg / max microseconds; the **min..max range is the
- * device jitter**. This proves A1+A4b put the device at ~tens of us and flags any hidden
- * stall (a surprisingly high max = a real target).
+ * Three timestamps off one 1us hardware timer (zero cross-device sync error):
+ *   edge()   -- raw button edge, FIRST thing in the GPIO doorbell ISR                 (T0)
+ *   report() -- the report is staged in USB DPRAM (ready to ship)                     (T1)
+ *   wire()   -- the report actually SHIPPED on the USB wire (endpoint-complete IRQ)   (T2)
  *
- * Resolution is 1 us (hardware timer). State is tiny + volatile; edge() runs in ISR context
- * and report() on the Core0 loop (the ISR preempts the loop, so no concurrent stat writes).
+ * Two measurements:
+ *   stats()      = T1 - T0 = edge -> build  = the DEVICE compute (~1us fast path). min..max is the
+ *                  device jitter. Excludes the host poll wait.
+ *   wireStats()  = T2 - T0 = edge -> wire   = the TRUE controller latency (button -> USB wire). Its
+ *                  AVERAGE is the ~500us USB-FS poll floor -- the number to compare against other
+ *                  boards, measured on the wire with NO external rig. Calibrate T2 once against a
+ *                  USB analyzer and it is ground truth from then on.
+ *
+ * State is tiny + volatile; edge()/wire() run in ISR context, report() on the loop or the ISR.
+ *
+ * TE_LATENCY_MEASURE gates the whole instrument. OFF (default) = production: every call below is
+ * an inline no-op, so the probe, the report edge-time stamp, and the OLED D/W HUD compile out to
+ * nothing and the shipping fast path carries zero probe overhead. Build a measurement image with
+ * -DTE_LATENCY_MEASURE=1 (see docs/latency-testing/).
  */
 #pragma once
 #include <stdint.h>
 
+#ifndef TE_LATENCY_MEASURE
+#define TE_LATENCY_MEASURE 0
+#endif
+
 namespace LatencyProbe {
-    void edge();     // arm + timestamp: FIRST thing in the button-edge ISR
-    void report();   // measure: when the report is loaded into the USB endpoint
-    void stats(uint32_t &min_us, uint32_t &avg_us, uint32_t &max_us, uint32_t &count);
+#if TE_LATENCY_MEASURE
+    void edge();     // T0: arm + timestamp, FIRST thing in the button-edge ISR
+    void report();   // T1: report staged in DPRAM (edge->build), and arm the edge->wire measure
+    void wire();     // T2: report shipped on the wire (edge->wire), from the endpoint-complete IRQ
+    uint32_t edgeTime();   // T0 device-us of the last edge -- stamp into the report reserved bytes
+                           // so a USB (Wireshark) capture can correlate edge -> host-receive.
+    void stats(uint32_t &min_us, uint32_t &avg_us, uint32_t &max_us, uint32_t &count);      // build
+    void wireStats(uint32_t &min_us, uint32_t &avg_us, uint32_t &max_us, uint32_t &count);  // wire
     void reset();
+#else
+    // Disabled: inline no-ops so every call site folds to nothing (no symbols, no ISR cost).
+    inline void edge() {}
+    inline void report() {}
+    inline void wire() {}
+    inline uint32_t edgeTime() { return 0; }
+    inline void stats(uint32_t &mn, uint32_t &av, uint32_t &mx, uint32_t &c) { mn = av = mx = c = 0; }
+    inline void wireStats(uint32_t &mn, uint32_t &av, uint32_t &mx, uint32_t &c) { mn = av = mx = c = 0; }
+    inline void reset() {}
+#endif
 }
