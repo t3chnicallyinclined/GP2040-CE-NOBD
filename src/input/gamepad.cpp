@@ -272,7 +272,7 @@ uint32_t Gamepad::socdCleanedGpio() const {
 	return g;
 }
 
-void Gamepad::process()
+void __not_in_flash_func(Gamepad::process)()
 {
 	// NOTE: Inverted X/Y-axis must run before SOCD and Dpad processing
 	if (options.invertXAxis) {
@@ -350,7 +350,7 @@ void Gamepad::process()
 	nobdTogglePinPrev = nobdTogglePinPressed;
 }
 
-void Gamepad::read()
+void __not_in_flash_func(Gamepad::read)()
 {
 	Mask_t values = Storage::getInstance().GetGamepad()->debouncedGpio;
 
