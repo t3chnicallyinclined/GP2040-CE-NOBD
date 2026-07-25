@@ -319,9 +319,14 @@ void __not_in_flash_func(Gamepad::process)()
 	}
 
 	// clean up after yourself. nobody likes bad inputs.
-	// SOCD-once via the DST-proven core (src/input/core); proven behavior-equivalent to
-	// the old runSOCDCleaner by test/socd_equiv.c. This is the single cleaning point.
-	state.dpad = CoreInput::cleanDpad(resolveSOCDMode(options), state.dpad);
+	// SOCD-once via the DST-proven core (src/input/core). SOCD only matters for leverless pads
+	// (Left+Right at once); a real joystick is mechanically exclusive, so BYPASS skips the call
+	// ENTIRELY -- keeping the hot path stateless, which is what makes the lookup-table / PIO-DMA
+	// paths possible (you can't table-ify state).
+	const SOCDMode socdMode = resolveSOCDMode(options);
+	if (socdMode != SOCD_MODE_BYPASS) {
+		state.dpad = CoreInput::cleanDpad(socdMode, state.dpad);
+	}
 
 	// since analog modes only care about the dpad mode inputs, set the dpad state to digital only dpad values
 	switch (activeDpadMode)

@@ -24,6 +24,10 @@ void __not_in_flash_func(report)() {
     if (!g_armed) return;
     const uint32_t d = time_us_32() - g_edge_us;
     g_armed = false;
+    // >10ms is never a real device latency: it's a stale arm (a button edge that produced no
+    // report change left its timestamp behind, read by a much later report) or a timer wrap.
+    // Discard it so it can't poison min/avg/max.
+    if (d > 10000u) return;
     if (d < g_min) g_min = d;
     if (d > g_max) g_max = d;
     g_sum += d;
