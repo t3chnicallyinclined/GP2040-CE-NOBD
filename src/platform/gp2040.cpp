@@ -13,6 +13,7 @@
 #include "drivers/dreamcast/DreamcastDriver.h"
 #include "input/core_bridge.h"
 #include "input/gpio_doorbell.h"
+#include "hardware/sync.h"   // __wfi -- A4b event-driven wake
 
 // Inputs for Core0
 #include "addons/analog.h"
@@ -372,7 +373,18 @@ void GP2040::run() {
 	// it won't fire while halted under a debugger.
 	watchdog_enable(WATCHDOG_TIMEOUT_MS, true);
 
+	// A4b: a 1 ms wake tick so the WFI event loop can sleep between button edges / USB polls
+	// and still feed the watchdog + run the time-based stages (sync window, turbo) when idle.
+	// The callback does no work -- its only job is to fire the alarm IRQ that wakes __wfi().
+	static repeating_timer_t wakeTimer;
+	add_repeating_timer_us(-1000, [](repeating_timer_t*) -> bool { return true; }, nullptr, &wakeTimer);
+
 	while (1) {
+		// A4b: the XInput path sleeps here until a button edge (GPIO doorbell), the 1 ms wake
+		// tick, or a USB IRQ -- CPU asleep between events instead of busy-polling. DC mode
+		// stays flat-out: its Maple ISR + netplay RX poll want every cycle.
+		if (!dcMode) __wfi();
+
 		// Feed the watchdog first thing every iteration. If the loop never
 		// comes back around (a hang), the chip resets within the timeout.
 		watchdog_update();
