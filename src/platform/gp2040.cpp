@@ -405,8 +405,14 @@ void GP2040::run() {
 			}
 			gamepad->setDpadMode(DPAD_MODE_DIGITAL);
 		} else if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
-			syncGpioGetAll();
+			// Stage 4: the doorbell/ISR owns the sync window now. Configure it and read its
+			// committed mask -- the whole system honors the SAME ISR-owned co-registration, and
+			// the commit fires from a hardware alarm (deterministic, CPU asleep), not the loop.
+			const GamepadOptions& o = Storage::getInstance().getGamepadOptions();
+			GpioDoorbell::configSync(true, o.nobdSyncDelay, o.nobdReleaseDebounce);
+			gamepad->debouncedGpio = GpioDoorbell::committed();
 		} else {
+			GpioDoorbell::configSync(false, 0, false);   // ISR passes pins straight through
 			debounceGpioGetAll();
 		}
 

@@ -2,26 +2,83 @@
 #include "pico.h"
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
-#include "hardware/sync.h"   // save_and_disable_interrupts / restore_interrupts
+#include "hardware/sync.h"    // save_and_disable_interrupts / restore_interrupts
+#include "hardware/timer.h"   // hardware_alarm_* + time
+#include "pico/time.h"        // to_ms_since_boot / get_absolute_time / make_timeout_time_ms
 #include "latency_probe.h"
+
+// The DST-proven sync-window core is C; give it C linkage (binds to sync_window.c).
+extern "C" {
+#include "core/sync_window.h"
+}
 
 namespace {
 
 volatile uint32_t g_edges   = 0;
 volatile bool     g_changed = false;
 
-// The rung-2 fast path: a driver-supplied builder run right here in the edge ISR. Function
-// pointer (single slot). Read/called from the ISR, written once from the loop at setup.
-void (* volatile g_fastpath)() = nullptr;
+// The rung-2 fast path: a driver-supplied builder run in the edge/timer ISRs, handed the
+// sync-committed pressed mask. Function pointer (single slot). Read from the ISRs, written once.
+void (* volatile g_fastpath)(uint32_t) = nullptr;
 
-// Runs in IO_IRQ_BANK0 context. The SDK's default GPIO handler acknowledges the pin IRQ
-// before invoking this callback, so we only record the event. RAM-pinned (hot ISR).
+// ---- Stage 4 state: the doorbell owns the sync window --------------------------------------
+uint32_t          s_buttonMask = 0;        // union of button pins (mask the raw read to these)
+sync_window_t     s_sync;                  // THE single sync state (was CoreInput::syncGpio's)
+bool              s_syncInited  = false;
+volatile bool     s_syncActive  = false;   // false => pins pass straight through (rung-2 path)
+volatile uint32_t s_committed   = 0;       // latest committed pressed mask (loop reads this)
+int               s_alarm       = -1;      // claimed hardware alarm for the commit deadline
+bool              s_alarmInited = false;
+
+inline uint32_t now_ms() { return to_ms_since_boot(get_absolute_time()); }
+
+// Step the input front stage with the current pins, update s_committed, and (if a window is
+// open) arm the one-pulse alarm at the nearest deadline. Returns true if committed changed.
+// RAM-pinned. When sync is OFF this is the validated ~1us straight-through path (no now/CS/alarm).
+bool __not_in_flash_func(stepSync)() {
+    const uint32_t raw = (~gpio_get_all()) & s_buttonMask;   // active-low -> pressed=1, masked
+    uint32_t c;
+    bool changed;
+    uint32_t next = 0;
+
+    if (s_syncActive) {
+        const uint32_t now = now_ms();
+        // s_sync is touched by the edge ISR, the alarm ISR, AND the loop -- a short critical
+        // section makes the step + its commit atomic across all three (single owner, no tear).
+        const uint32_t save = save_and_disable_interrupts();
+        c = (uint32_t)sync_window_step(&s_sync, now, (buttons_t)raw);
+        const uint32_t pc = s_sync.open         ? (s_sync.deadline - now)         : 0u;
+        const uint32_t rc = s_sync.release_open ? (s_sync.release_deadline - now) : 0u;
+        next = (pc && rc) ? (pc < rc ? pc : rc) : (pc ? pc : rc);   // nearest pending deadline
+        changed = (c != s_committed);
+        s_committed = c;
+        restore_interrupts(save);
+    } else {
+        c = raw;                                 // straight through: the 1us floor path
+        changed = (c != s_committed);
+        s_committed = c;
+    }
+
+    if (next && s_alarm >= 0) {
+        hardware_alarm_set_target((uint)s_alarm, make_timeout_time_ms(next));
+    }
+    return changed;
+}
+
+// Fires at a co-registration deadline: commit the window's collected inputs and stage the report,
+// exactly on time, with the CPU otherwise asleep. Runs in TIMER_IRQ context; RAM-pinned.
+void __not_in_flash_func(sync_alarm_cb)(uint /*alarm_num*/) {
+    if (stepSync()) { auto fp = g_fastpath; if (fp) fp(s_committed); }
+}
+
+// Runs in IO_IRQ_BANK0 context. The SDK's default GPIO handler ACKs the pin IRQ before invoking
+// this, so we only react. RAM-pinned (hot ISR).
 void __not_in_flash_func(doorbell_cb)(uint /*gpio*/, uint32_t /*events*/) {
     LatencyProbe::edge();   // timestamp the raw button edge, first thing
-    // FAST PATH (rung 2): rebuild + stage the report NOW, on the edge, so it's in the endpoint
-    // in ~1us flat instead of waiting the avg 70us for the loop to lap back to the read. This
-    // is the whole point -- the report is built on the EDGE's clock, not the loop's.
-    if (g_fastpath) g_fastpath();
+    // Step the front stage on the edge and, if the committed state changed, stage the report NOW
+    // (the report is built on the EDGE's clock, not the loop's). A press inside an open sync
+    // window doesn't change committed yet -- it commits from the alarm at the deadline.
+    if (stepSync()) { auto fp = g_fastpath; if (fp) fp(s_committed); }
     g_edges++;
     g_changed = true;
 }
@@ -31,6 +88,14 @@ void __not_in_flash_func(doorbell_cb)(uint /*gpio*/, uint32_t /*events*/) {
 namespace GpioDoorbell {
 
 void init(uint32_t buttonMask) {
+    s_buttonMask = buttonMask;
+    if (!s_alarmInited) {
+        // required=false: if no hardware alarm is free, s_alarm stays -1 and we degrade to the
+        // loop-poll commit (committed() steps the window each iteration) -- slower but never a panic.
+        s_alarm = hardware_alarm_claim_unused(false);
+        if (s_alarm >= 0) hardware_alarm_set_callback((uint)s_alarm, &sync_alarm_cb);
+        s_alarmInited = true;
+    }
     gpio_set_irq_callback(&doorbell_cb);
     for (uint pin = 0; pin < NUM_BANK0_GPIOS; pin++) {
         const bool on = (buttonMask & (1u << pin)) != 0u;
@@ -49,6 +114,23 @@ bool __not_in_flash_func(consumeChanged)() {
 
 uint32_t edgeCount() { return g_edges; }
 
-void registerFastPath(void (*fn)()) { g_fastpath = fn; }
+void registerFastPath(void (*fn)(uint32_t committed)) { g_fastpath = fn; }
+
+void configSync(bool active, uint32_t window, bool releaseDebounce) {
+    const uint32_t w = window < 1u ? 1u : (window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : window);
+    const uint32_t save = save_and_disable_interrupts();
+    if (!s_syncInited) { sync_window_init(&s_sync, w, releaseDebounce); s_syncInited = true; }
+    s_sync.window          = w;               // dynamic, like the incumbent re-read each call
+    s_sync.release_debounce = releaseDebounce;
+    s_syncActive           = active;
+    restore_interrupts(save);
+}
+
+uint32_t committed() {
+    // Step with the current pins too: catches a button held at boot (no edge to trigger the ISR)
+    // and backstops the event-driven commit. Does NOT stage a report -- the loop's own path does.
+    stepSync();
+    return s_committed;
+}
 
 } // namespace GpioDoorbell
