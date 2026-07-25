@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stddef.h>   /* NULL */
 #include "socd.h"
+#include "core_hot.h"
 
 /*
  * One SOCD axis (a pair of opposing directions). Returns the bits to KEEP for the
@@ -57,7 +58,7 @@ void socd_init(socd_t *s, socd_mode_t mode)
     s->win_h = 0;
 }
 
-buttons_t socd_clean(socd_t *s, buttons_t pressed)
+buttons_t CORE_HOT(socd_clean)(socd_t *s, buttons_t pressed)
 {
     assert(s != NULL);
 

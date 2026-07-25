@@ -1,4 +1,5 @@
 #include "core_bridge.h"
+#include "pico.h"   // __not_in_flash_func -- RAM-pin the hot bridge (no XIP jitter)
 
 /* the vendored core is C; give its declarations C linkage so they bind to socd.c */
 extern "C" {
@@ -30,7 +31,7 @@ bool     g_inited = false;
 
 namespace CoreInput {
 
-uint8_t cleanDpad(SOCDMode mode, uint8_t dpad) {
+uint8_t __not_in_flash_func(cleanDpad)(SOCDMode mode, uint8_t dpad) {
     if (!g_inited) {
         socd_init(&g_socd, mapMode(mode));
         g_inited = true;
@@ -44,7 +45,7 @@ uint8_t cleanDpad(SOCDMode mode, uint8_t dpad) {
     return (uint8_t)(cleaned & 0x0Fu);
 }
 
-uint32_t syncGpio(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now) {
+uint32_t __not_in_flash_func(syncGpio)(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now) {
     static sync_window_t sw;
     static bool sw_inited = false;
     uint32_t w = window < 1u ? 1u : (window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : window);

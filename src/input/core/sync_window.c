@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stddef.h>   /* NULL */
 #include "sync_window.h"
+#include "core_hot.h"
 
 /*
  * A faithful port of ../../input/sync_window.py -- set operations become bitmask
@@ -25,7 +26,7 @@ void sync_window_init(sync_window_t *s, uint32_t window, bool release_debounce)
     s->release_deadline = 0;
 }
 
-buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw)
+buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t raw)
 {
     assert(s != NULL);
     assert(!s->started || now >= s->last_now);   /* monotonic: repeats OK (V1 polls faster than a tick), never backward */
