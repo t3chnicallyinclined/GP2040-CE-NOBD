@@ -12,6 +12,7 @@
 #include "usbhostmanager.h"
 #include "drivers/dreamcast/DreamcastDriver.h"
 #include "input/core_bridge.h"
+#include "input/gpio_doorbell.h"
 
 // Inputs for Core0
 #include "addons/analog.h"
@@ -256,6 +257,10 @@ void GP2040::initializeStandardGpio() {
 			buttonGpios |= 1 << pin;    // mark this pin as mattering for GPIO debouncing
 		}
 	}
+
+	// A4a: arm the input doorbell -- edge IRQs on exactly these button pins, so the CPU can
+	// wake on a real button edge (A4b) instead of polling. Silicon watches the buttons.
+	GpioDoorbell::init(buttonGpios);
 }
 
 /**
