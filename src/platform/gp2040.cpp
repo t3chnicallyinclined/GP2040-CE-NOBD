@@ -11,6 +11,7 @@
 #include "types.h"
 #include "usbhostmanager.h"
 #include "drivers/dreamcast/DreamcastDriver.h"
+#include "input/core_bridge.h"
 
 // Inputs for Core0
 #include "addons/analog.h"
@@ -314,57 +315,13 @@ void GP2040::syncGpioGetAll() {
 	uint32_t nobdSyncDelay = options.nobdSyncDelay;
 	bool releaseDebounce = options.nobdReleaseDebounce;
 
-	static bool     sync_pending   = false;
-	static uint64_t sync_start_us  = 0;
-	static Mask_t   sync_new       = 0;
-
-	static Mask_t   pending_release   = 0;
-	static uint64_t release_start_us  = 0;
-
-	uint64_t now_us = to_us_since_boot(get_absolute_time());
-	uint64_t syncDelay_us = (uint64_t)nobdSyncDelay * 1000;
-
-	if (!sync_pending && !pending_release &&
-	    gamepad->debouncedGpio == (raw_gpio & buttonGpios)) return;
-
-	Mask_t raw_buttons   = raw_gpio & buttonGpios;
-	Mask_t prev          = gamepad->debouncedGpio;
-	Mask_t just_pressed  = raw_buttons & ~prev & ~sync_new;
-	Mask_t just_released = prev & ~raw_buttons;
-
-	if (releaseDebounce) {
-		if (just_released) {
-			pending_release |= just_released;
-			if (release_start_us == 0) release_start_us = now_us;
-		}
-		pending_release &= ~raw_buttons;
-		if (pending_release && (now_us - release_start_us) >= syncDelay_us) {
-			gamepad->debouncedGpio &= ~pending_release;
-			pending_release  = 0;
-			release_start_us = 0;
-		}
-		if (!pending_release) release_start_us = 0;
-	} else {
-		if (just_released) gamepad->debouncedGpio &= ~just_released;
-	}
-
-	sync_new &= raw_buttons;
-
-	if (just_pressed) {
-		if (!sync_pending) {
-			sync_pending  = true;
-			sync_start_us = now_us;
-			sync_new      = just_pressed;
-		} else {
-			sync_new |= just_pressed;
-		}
-	}
-
-	if (sync_pending && (now_us - sync_start_us) >= syncDelay_us) {
-		gamepad->debouncedGpio |= sync_new;
-		sync_pending = false;
-		sync_new     = 0;
-	}
+	// NOBD sync window (co-registration) via the DST-proven core sync_window_step. This
+	// slot is sync OR debounce, never both. millis() is the monotonic tick; window =
+	// nobdSyncDelay ms (the core caps at 500). Proven behavior-equivalent to the old
+	// ad-hoc impl for realistic input by test/sync_equiv.c, and the core fixes the
+	// release_debounce "never releases" bug the old one shared with the spec.
+	gamepad->debouncedGpio = CoreInput::syncGpio(raw_gpio & buttonGpios,
+	                                             nobdSyncDelay, releaseDebounce, getMillis());
 }
 
 void GP2040::run() {

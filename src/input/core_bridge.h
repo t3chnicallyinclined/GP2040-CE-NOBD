@@ -23,4 +23,12 @@ namespace CoreInput {
      * in place when it changes (history preserved, matching the incumbent).
      */
     uint8_t cleanDpad(SOCDMode mode, uint8_t dpad);
+
+    /*
+     * NOBD sync window (co-registration) via the DST-proven core sync_window_step, which
+     * REPLACES debounce in the input-conditioning slot (one or the other). rawButtons is the
+     * pressed-button GPIO mask; window is nobdSyncDelay in ms (clamped 1..500); now is
+     * millis() (monotonic). Returns the co-registered button mask.
+     */
+    uint32_t syncGpio(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now);
 }

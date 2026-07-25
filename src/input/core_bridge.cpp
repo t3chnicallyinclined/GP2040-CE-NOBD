@@ -3,6 +3,7 @@
 /* the vendored core is C; give its declarations C linkage so they bind to socd.c */
 extern "C" {
 #include "core/socd.h"
+#include "core/sync_window.h"
 }
 
 namespace {
@@ -41,6 +42,16 @@ uint8_t cleanDpad(SOCDMode mode, uint8_t dpad) {
     /* dpad bits UP..RIGHT (0..3) == BTN_UP..RIGHT; only the four dirs are meaningful */
     buttons_t cleaned = socd_clean(&g_socd, (buttons_t)(dpad & 0x0Fu));
     return (uint8_t)(cleaned & 0x0Fu);
+}
+
+uint32_t syncGpio(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now) {
+    static sync_window_t sw;
+    static bool sw_inited = false;
+    uint32_t w = window < 1u ? 1u : (window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : window);
+    if (!sw_inited) { sync_window_init(&sw, w, releaseDebounce); sw_inited = true; }
+    sw.window = w;                       /* dynamic: the incumbent re-read nobdSyncDelay each call */
+    sw.release_debounce = releaseDebounce;
+    return (uint32_t)sync_window_step(&sw, now, (buttons_t)rawButtons);
 }
 
 } // namespace CoreInput
