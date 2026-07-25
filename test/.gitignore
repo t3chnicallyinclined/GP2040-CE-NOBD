@@ -4,3 +4,9 @@
 *.o
 *.obj
 *.ilk
+# fuzzer build output + python cache (test/reference/input)
+build/
+__pycache__/
+*.dll
+*.so
+*.dylib
