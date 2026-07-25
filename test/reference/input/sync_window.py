@@ -42,7 +42,7 @@ class SyncWindow:
 
     def step(self, now, raw):
         """Advance to time `now` with raw pressed-set `raw`; return committed set."""
-        assert now > self._now, "time must strictly advance"
+        assert now >= self._now, "time must be monotonic (repeats OK, never backward)"
         raw = set(raw)
 
         # releases: immediate by default; with release_debounce, a release waits out the

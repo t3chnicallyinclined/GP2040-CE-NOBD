@@ -28,7 +28,7 @@ void sync_window_init(sync_window_t *s, uint32_t window, bool release_debounce)
 buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw)
 {
     assert(s != NULL);
-    assert(!s->started || now > s->last_now);    /* time must strictly advance */
+    assert(!s->started || now >= s->last_now);   /* monotonic: repeats OK (V1 polls faster than a tick), never backward */
 
     /* releases: immediate by default; with release_debounce, a release waits out the
      * window symmetrically to a press (so a release co-registers/debounces like a press,
