@@ -25,4 +25,11 @@ namespace GpioDoorbell {
     // Total button edges observed (diagnostic; wraps). Lets a bench confirm the silicon
     // is seeing presses without touching the loop.
     uint32_t edgeCount();
+
+    // Register a RAM-pinned callback run INSIDE the edge ISR -- the "fast path" (rung 2). On
+    // every button edge the driver rebuilds + stages its report immediately, instead of waiting
+    // for the main loop to lap back around to the read (the loop-cycle latency the bench proved
+    // dominant: min 1us but avg 70us / max 1000us). fn must be short, RAM-pinned, and touch only
+    // ISR-safe state. Pass nullptr to disarm. Single slot (one driver owns the fast path).
+    void registerFastPath(void (*fn)());
 }

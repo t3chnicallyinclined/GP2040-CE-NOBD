@@ -10,10 +10,18 @@ namespace {
 volatile uint32_t g_edges   = 0;
 volatile bool     g_changed = false;
 
+// The rung-2 fast path: a driver-supplied builder run right here in the edge ISR. Function
+// pointer (single slot). Read/called from the ISR, written once from the loop at setup.
+void (* volatile g_fastpath)() = nullptr;
+
 // Runs in IO_IRQ_BANK0 context. The SDK's default GPIO handler acknowledges the pin IRQ
 // before invoking this callback, so we only record the event. RAM-pinned (hot ISR).
 void __not_in_flash_func(doorbell_cb)(uint /*gpio*/, uint32_t /*events*/) {
     LatencyProbe::edge();   // timestamp the raw button edge, first thing
+    // FAST PATH (rung 2): rebuild + stage the report NOW, on the edge, so it's in the endpoint
+    // in ~1us flat instead of waiting the avg 70us for the loop to lap back to the read. This
+    // is the whole point -- the report is built on the EDGE's clock, not the loop's.
+    if (g_fastpath) g_fastpath();
     g_edges++;
     g_changed = true;
 }
@@ -40,5 +48,7 @@ bool __not_in_flash_func(consumeChanged)() {
 }
 
 uint32_t edgeCount() { return g_edges; }
+
+void registerFastPath(void (*fn)()) { g_fastpath = fn; }
 
 } // namespace GpioDoorbell
