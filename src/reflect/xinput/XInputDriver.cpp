@@ -331,6 +331,10 @@ bool XInputDriver::process(Gamepad * gamepad) {
         // assume gamepad if not special cased
     }
 
+    // Measure raw edge -> report BUILT (pure device compute, BEFORE the USB queue) so we
+    // separate our processing time from the endpoint/poll gating that follows.
+    LatencyProbe::report();
+
     bool reportSent = false;
 
     // compare against previous report and send new
@@ -341,7 +345,6 @@ bool XInputDriver::process(Gamepad * gamepad) {
             usbd_edpt_claim(0, endpoint_in);								// Take control of IN endpoint
             usbd_edpt_xfer(0, endpoint_in, (uint8_t *)&xinputReport, sizeof(XInputReport)); // Send report buffer
             usbd_edpt_release(0, endpoint_in);								// Release control of IN endpoint
-            LatencyProbe::report();										// raw edge -> report-loaded delta
             memcpy(last_report, &xinputReport, sizeof(XInputReport)); // save if we sent it
             reportSent = true;
         }
