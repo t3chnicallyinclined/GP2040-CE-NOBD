@@ -124,6 +124,11 @@ void init(uint32_t buttonMask) {
         const bool on = (buttonMask & (1u << pin)) != 0u;
         gpio_set_irq_enabled(pin, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, on);
     }
+    // Tournament determinism: the button edge -> report path must be the FIRST thing the core
+    // services, so an in-flight USB or timer IRQ can never delay it. Give the GPIO bank the highest
+    // priority (0), same as the Maple bus -- this squeezes the worst-case edge->ISR jitter, not the
+    // mean (mean is already the USB poll floor). Set before enabling so it's prioritized from boot.
+    irq_set_priority(IO_IRQ_BANK0, PICO_HIGHEST_IRQ_PRIORITY);
     irq_set_enabled(IO_IRQ_BANK0, true);
 }
 
