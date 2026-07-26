@@ -64,6 +64,12 @@ class SyncWindow:
             if not self._pending_release:
                 self._release_open = False
 
+        # A press released BEFORE its window commits is dropped -- never co-registered. Prune pending
+        # to bits still held (mirrors V1 syncGpioGetAll's `sync_new &= raw_buttons`). Without this,
+        # rapid direction taps faster than the window accumulate and ALL commit together -> phantom
+        # opposing directions -> the d-pad sticks. Matches the sync_window.c fix.
+        self._pending &= raw
+
         # a new press (not committed, not already pending) opens or joins a window
         new = raw - self.committed - self._pending
         if new:

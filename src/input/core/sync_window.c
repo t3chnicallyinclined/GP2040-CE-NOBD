@@ -55,6 +55,14 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
             s->release_open = false;
     }
 
+    /* A press released BEFORE its window commits is dropped -- never co-registered. Prune pending
+     * to bits still held (mirrors V1 syncGpioGetAll's `sync_new &= raw_buttons`). Without this,
+     * rapid direction taps (MvC2 tri-dash / wavedash / piano, all faster than the window) accumulate
+     * and ALL commit at the deadline -> phantom opposing directions -> the d-pad STICKS until a
+     * release step strips them. This is the regression the ad-hoc->core port introduced; the release
+     * half was aligned in 19d8ad0a but the press half was not, and the realistic-input DST missed it. */
+    s->pending &= raw;
+
     /* a new press (not committed, not already pending) opens or joins a window */
     buttons_t fresh = raw & ~s->committed & ~s->pending;
     if (fresh) {
