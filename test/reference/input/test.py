@@ -81,6 +81,23 @@ def test_sync_release_immediate():
     assert out[3] == {"A"} and out[4] == set()
 
 
+def test_sync_tap_released_before_window_dropped():
+    # A pressed then released BEFORE its window commits -> dropped, never committed. This prune is
+    # what stops rapid direction taps from accumulating (see the MvC2 regression test below).
+    out = _run_sw(5, [{"A"}, {"A"}, set(), set(), set(), set()])
+    assert all("A" not in o for o in out), f"tap inside the window should be dropped, got {out}"
+
+
+def test_sync_rapid_direction_no_phantom():
+    # REGRESSION (MvC2, no input buffer): whipping the stick RIGHT->LEFT faster than the window
+    # fires a burst of transition edges. Without the `pending &= raw` prune those accumulated and
+    # committed together as a phantom LEFT+RIGHT that STUCK; with it, only the direction still held
+    # at the deadline commits. window=5: hold RIGHT, rapid R/L transition, settle on LEFT.
+    out = _run_sw(5, [{"RIGHT"}, set(), {"LEFT"}, set(), {"LEFT"}, {"LEFT"}, {"LEFT"}])
+    assert all(not ({"LEFT", "RIGHT"} <= o) for o in out), f"phantom LEFT+RIGHT committed: {out}"
+    assert out[-1] == {"LEFT"}, f"should settle on the held direction (LEFT), got {out[-1]}"
+
+
 def test_bounce_absorbed_by_window():
     # a switch chattering WITHIN the window commits exactly once -> debounce redundant
     out = _run_sw(5, [{"A"}, set(), {"A"}, set(), {"A"}, {"A"}, {"A"}])
@@ -204,6 +221,8 @@ if __name__ == "__main__":
     test_sync_coregistration();            print("  [OK] sync window: near-simultaneous presses co-register on one frame")
     test_sync_outside_window_separate();   print("  [OK] sync window: presses past the window are separate frames")
     test_sync_release_immediate();         print("  [OK] sync window: release is immediate (release-debounce off)")
+    test_sync_tap_released_before_window_dropped(); print("  [OK] sync window: tap released before window is dropped")
+    test_sync_rapid_direction_no_phantom();         print("  [OK] sync window: rapid direction whip -> no phantom stuck d-pad (MvC2)")
     test_bounce_absorbed_by_window();      print("  [OK] sync window absorbs intra-window bounce (debounce redundant)")
     test_pipeline_low_latency();           print("  [OK] pipeline low-latency preset: instant + SOCD")
     test_pipeline_window_on();             print("  [OK] pipeline sync-window preset: co-registration delay")

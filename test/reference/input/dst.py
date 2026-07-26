@@ -111,8 +111,13 @@ def _invariants(window, raw, committed, presses):
     for tp, btn in presses:                              # I2
         if tp + window >= NTICKS:
             continue                                     # window would exceed the run
-        if not any(btn in committed[t] for t in range(tp, tp + window + 1)):
-            return f"I2 latency: press {btn}@{tp} not committed within {window} ticks"
+        # A press HELD through its window must commit within `window` ticks. A press RELEASED
+        # before the window commits is correctly DROPPED (the `pending &= raw` prune), so it
+        # carries no commit obligation -- that prune is what stops rapid direction taps from
+        # accumulating into phantom opposing directions (the MvC2 stuck-dpad regression).
+        held_through = all(btn in raw[t] for t in range(tp, tp + window + 1))
+        if held_through and not any(btn in committed[t] for t in range(tp, tp + window + 1)):
+            return f"I2 latency: held press {btn}@{tp} not committed within {window} ticks"
     for t in range(NTICKS):                              # I3
         for btn in committed[t]:
             lo = max(0, t - window)
