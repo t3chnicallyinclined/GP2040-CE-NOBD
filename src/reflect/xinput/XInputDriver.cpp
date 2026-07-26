@@ -55,10 +55,10 @@ static XInputAuthData * xinputAuthData = nullptr;
 // sees a change -- which only happens AFTER it re-reads the same pins -- so it can only ever
 // write the SAME buttons the ISR already wrote. No lock, no clobber.
 //
-// SCOPE (bench experiment): assumes the competitive-digital config -- XInput mode, d-pad in
-// DIGITAL mode, SOCD bypassed, no axis-invert / 4-way / analog-stick remap. Those transforms
-// live only in the loop's process(); the fast path is a straight pin->button OR. buttons1/2
-// offsets are 2/3 in XInputReport. Debounce is deliberately NOT here yet -- watch for chatter.
+// SCOPE: the ISR handles XInput gamepad mode with digital OR analog d-pad, plus sync, debounce,
+// axis-invert, 4-way, the stateless SOCD modes (neutral/up-priority) and dpad->stick -- all proven
+// equal to the loop by the safety gate below. Loop-only by design: stateful SOCD (last/first-win),
+// non-gamepad device types, addon-touched reports. buttons1/2 offsets are 2/3 in XInputReport.
 namespace {
     volatile bool s_fastReady = false;   // snapshot done + registered (set last, single writer)
     uint8_t  s_fastEpIn = 0;
@@ -69,6 +69,12 @@ namespace {
     // Stage 2 (combinational): axis invert + 4-way, published by the loop's gate before it compares
     // and before the ISR next runs. bool read/write is atomic on M0+, so no lock needed.
     volatile bool s_invX = false, s_invY = false, s_fourWay = false;
+    // SOCD (Stage 2), stateless modes only: 0 = off/bypass, 1 = neutral, 2 = up-priority. Stateful
+    // last/first-win need press-order history, so they stay gated to the loop.
+    volatile uint8_t s_socd = 0;
+    // Dpad mode: 0 = digital, 1 = left-analog, 2 = right-analog. Analog modes drive a stick from the
+    // (fully processed) dpad -- a pure function, so the fast path can do it and the gate can prove it.
+    volatile uint8_t s_dpadMode = 0;
 }
 
 // The straight pin->button map, shared by the ISR (fast path) and the loop (safety gate) so the
@@ -76,7 +82,8 @@ namespace {
 // this exact function on the loop's debounced input and comparing to the loop's real report.
 // always_inline so each caller gets a copy in its own section (RAM for the ISR, flash for the gate).
 static inline __attribute__((always_inline))
-void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t& rt) {
+void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t& rt,
+                     int16_t& lx, int16_t& ly, int16_t& rx, int16_t& ry) {
     b1 = 0;
     if (p & s_pmUp)    b1 |= XBOX_MASK_UP;
     if (p & s_pmDown)  b1 |= XBOX_MASK_DOWN;
@@ -102,6 +109,19 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
     if (s_fourWay) {
         b1 = (uint8_t)((b1 & 0xF0u) | filterToFourWayMode((uint8_t)(b1 & 0x0Fu)));
     }
+    // SOCD (Stage 2, AFTER 4-way -- process() order is invert, 4-way, then SOCD). Only the two
+    // STATELESS modes run here; last/first-win are stateful and stay gated to the loop. This mirrors
+    // socd_axis() in input/core/socd.c for neutral/up-priority exactly (dpad bits are 1<<0..3 in both
+    // spaces), and the safety gate proves it equals the loop's socd_clean() output live -- so any
+    // drift just disarms the fast path, never emits a wrong frame.
+    if (s_socd) {
+        if ((b1 & (XBOX_MASK_UP | XBOX_MASK_DOWN)) == (XBOX_MASK_UP | XBOX_MASK_DOWN)) {
+            b1 &= ~(XBOX_MASK_UP | XBOX_MASK_DOWN);       // both pressed: neutral cancels...
+            if (s_socd == 2u) b1 |= XBOX_MASK_UP;          // ...up-priority keeps UP
+        }
+        if ((b1 & (XBOX_MASK_LEFT | XBOX_MASK_RIGHT)) == (XBOX_MASK_LEFT | XBOX_MASK_RIGHT))
+            b1 &= ~(XBOX_MASK_LEFT | XBOX_MASK_RIGHT);     // Left+Right cancels in both modes
+    }
     b2 = 0;
     if (p & s_pmLB)   b2 |= XBOX_MASK_LB;
     if (p & s_pmRB)   b2 |= XBOX_MASK_RB;
@@ -112,6 +132,23 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
     if (p & s_pmY)    b2 |= XBOX_MASK_Y;
     lt = (p & s_pmL2) ? 0xFFu : 0u;   // digital triggers; analog-trigger configs are gated out
     rt = (p & s_pmR2) ? 0xFFu : 0u;
+
+    // Sticks. Default to CENTER using the loop's exact report conversion (state uint16 -> report
+    // int16: X = v + INT16_MIN, Y = ~v + INT16_MIN). For a digital-dpad, no-analog-input config the
+    // loop leaves the sticks centered, so this matches; real analog-stick inputs aren't in this map,
+    // so they diverge here and the gate keeps them on the loop.
+    lx = rx = (int16_t)((int16_t)GAMEPAD_JOYSTICK_MID + INT16_MIN);
+    ly = ry = (int16_t)((int16_t)(~(uint16_t)GAMEPAD_JOYSTICK_MID) + INT16_MIN);
+    // Analog-dpad (Stage 2, LAST -- process() converts the fully-processed dpad to a stick after
+    // invert/4-way/SOCD, then zeroes the digital dpad). Same dpadToAnalog* the loop calls, so exact.
+    if (s_dpadMode) {
+        const uint8_t dp = (uint8_t)(b1 & 0x0Fu);
+        const int16_t cx = (int16_t)((int16_t)dpadToAnalogX(dp) + INT16_MIN);
+        const int16_t cy = (int16_t)((int16_t)(~dpadToAnalogY(dp)) + INT16_MIN);
+        if (s_dpadMode == 1u) { lx = cx; ly = cy; }   // left-analog
+        else                  { rx = cx; ry = cy; }   // right-analog
+        b1 &= 0xF0u;   // dpad now lives on the stick; digital nibble -> 0 (loop's dpadOnlyMask)
+    }
 }
 
 static void __not_in_flash_func(xinput_fastpath)(uint32_t committed) {
@@ -123,11 +160,18 @@ static void __not_in_flash_func(xinput_fastpath)(uint32_t committed) {
     // is the co-registered pressed mask. Format it straight into the staged report. (When sync is
     // off, committed == the raw pressed mask, so this is still the pure ~1us straight map.)
     uint8_t b1, b2, lt, rt;
-    xinput_straight(committed, b1, b2, lt, rt);
+    int16_t lx, ly, rx, ry;
+    xinput_straight(committed, b1, b2, lt, rt, lx, ly, rx, ry);
     dpram[2] = b1;   // XInputReport.buttons1
     dpram[3] = b2;   // XInputReport.buttons2
     dpram[4] = lt;   // XInputReport.lt
     dpram[5] = rt;   // XInputReport.rt
+    if (s_dpadMode) {   // analog-dpad: the dpad drives a stick -- write the 4 sticks (int16 LE, 2-aligned)
+        *(volatile int16_t*)(dpram + 6)  = lx;   // XInputReport.lx
+        *(volatile int16_t*)(dpram + 8)  = ly;   // XInputReport.ly
+        *(volatile int16_t*)(dpram + 10) = rx;   // XInputReport.rx
+        *(volatile int16_t*)(dpram + 12) = ry;   // XInputReport.ry
+    }
 #if TE_LATENCY_MEASURE
     // MEASURE (compiled out of production): stamp the device edge time (T0) into the report's reserved
     // region so a passive USB capture reads, per report, WHEN the device saw the edge -> correlate
@@ -483,8 +527,8 @@ bool XInputDriver::process(Gamepad * gamepad) {
     // between pins and report. Rather than enumerate every transform (miss one -> silent wrong
     // reports), we PROVE equivalence live each loop: run the SAME straight map on the loop's
     // debounced input and check it equals the loop's real report, with debounce+sync disabled.
-    // Match -> arm the ISR. Any divergence -- analog dpad, invert, 4-way, turbo/macro, SOCD
-    // firing, non-gamepad type, sync/debounce engaged -- disarms it and the loop owns the report.
+    // Match -> arm the ISR. Any divergence -- turbo/macro, stateful SOCD, non-gamepad type, an
+    // addon touching the report -- disarms it and the loop owns the report.
     // Re-checked every loop, so a mode switch (hotkey/toggle) flips it safely. This gate IS the
     // harness we widen, one DST-proven stage at a time, toward "all inputs on the 1us path".
     if (s_fastReady) {
@@ -493,27 +537,40 @@ bool XInputDriver::process(Gamepad * gamepad) {
         s_invX = opt.invertXAxis;   // publish transform config to the ISR BEFORE we compare or it runs
         s_invY = opt.invertYAxis;
         s_fourWay = gp->getFourWayModeActive();
+        const SOCDMode socdMode = Gamepad::resolveSOCDMode(opt);
+        s_socd = (socdMode == SOCD_MODE_NEUTRAL)     ? 1u
+               : (socdMode == SOCD_MODE_UP_PRIORITY) ? 2u : 0u;   // 0 also covers bypass (no-op)
+        const DpadMode dpadMode = gp->getActiveDpadMode();
+        s_dpadMode = (dpadMode == DpadMode::DPAD_MODE_LEFT_ANALOG)  ? 1u
+                   : (dpadMode == DpadMode::DPAD_MODE_RIGHT_ANALOG) ? 2u : 0u;   // 0 = digital
         uint8_t o1, o2, olt, ort;
-        xinput_straight(gp->debouncedGpio, o1, o2, olt, ort);
+        int16_t olx, oly, orx, ory;
+        xinput_straight(gp->debouncedGpio, o1, o2, olt, ort, olx, oly, orx, ory);
         const bool mappingStraight = (xinputReport.buttons1 == o1) && (xinputReport.buttons2 == o2)
-                                   && (xinputReport.lt == olt) && (xinputReport.rt == ort);
+                                   && (xinputReport.lt == olt) && (xinputReport.rt == ort)
+                                   && (xinputReport.lx == olx) && (xinputReport.ly == oly)
+                                   && (xinputReport.rx == orx) && (xinputReport.ry == ory);
 
         // PRODUCTION SAFETY -- PROACTIVE whitelist. Arm the ISR ONLY inside the config envelope it
-        // provably covers, so a partially-covered mode (e.g. 4-way: cardinals match but a diagonal
-        // wouldn't) can never emit even ONE wrong frame before the reactive check would notice.
-        // Every transform the ISR does NOT yet handle disarms it here, BEFORE any input can diverge;
-        // anything outside the whitelist falls back to the loop = the incumbent GP2040 path (known-
-        // good). Invert, sync, debounce AND 4-way are handled in the ISR now, so they're absent here.
-        // mappingStraight is the final backstop for anything unforeseen. Still gated (not yet in the
-        // ISR): analog-dpad (needs stick bytes), non-bypass SOCD (stateful), non-gamepad device
-        // types, and any addon that touched the report.
+        // provably covers, so a partially-covered mode can never emit even ONE wrong frame before the
+        // reactive mappingStraight check would notice. Anything outside falls back to the loop = the
+        // incumbent GP2040 path (known-good). The ISR now handles: invert, sync, debounce, 4-way, the
+        // STATELESS SOCD modes (neutral/up-priority), and analog-dpad (digital + both analog modes).
+        // Kept on the loop by DESIGN, not TODO: STATEFUL SOCD (last/first-win depend on press-order
+        // history, which the edge-driven ISR and the snapshot-driven loop can't agree on), non-gamepad
+        // device types (wheel/guitar/drum -> different report formats), and addon-touched reports
+        // (addons run in the loop). mappingStraight (buttons + triggers + sticks) is the final backstop.
         const bool gamepadType = (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_WHEEL)
                               && (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GUITAR)
                               && (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_DRUM);
-        const bool digitalDpad = (gp->getActiveDpadMode() == DpadMode::DPAD_MODE_DIGITAL);
-        const bool socdBypass  = (Gamepad::resolveSOCDMode(opt) == SOCD_MODE_BYPASS);
+        const bool dpadModeOk = (dpadMode == DpadMode::DPAD_MODE_DIGITAL)
+                             || (dpadMode == DpadMode::DPAD_MODE_LEFT_ANALOG)
+                             || (dpadMode == DpadMode::DPAD_MODE_RIGHT_ANALOG);
+        const bool socdStateless = (socdMode == SOCD_MODE_BYPASS)
+                                || (socdMode == SOCD_MODE_NEUTRAL)
+                                || (socdMode == SOCD_MODE_UP_PRIORITY);
         const bool eligible = mappingStraight && gamepadType
-                           && digitalDpad && socdBypass && !g_teAddonTouchedInputs;
+                           && dpadModeOk && socdStateless && !g_teAddonTouchedInputs;
         GpioDoorbell::registerFastPath(eligible ? &xinput_fastpath : nullptr);
     }
 
