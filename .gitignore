@@ -39,6 +39,7 @@ process_whitelist.json
 build_p2w/
 build_w6100/
 _test_builds/
+tools/lag-tester/build*/
 
 # Large external references / datasheets (third-party)
 maplepad_ref/
