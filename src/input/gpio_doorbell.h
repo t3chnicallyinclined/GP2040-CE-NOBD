@@ -32,6 +32,11 @@ namespace GpioDoorbell {
     // and touch only ISR-safe state. Pass nullptr to disarm. Single slot (one driver owns it).
     void registerFastPath(void (*fn)(uint32_t committed));
 
+    // True while a fast-path builder is registered -- i.e. the gate has PROVEN the ISR owns the
+    // report (output == straight-map, no addon touching it). The event-driven loop (A4b) reads this
+    // to know the input pipeline is redundant this iteration and can be skipped.
+    bool fastPathArmed();
+
     // ---- Stage 4: the doorbell owns the NOBD sync window --------------------------------------
     // The sync window (co-registration front stage) runs here now, driven by the edge ISR + a
     // one-pulse hardware alarm, so a commit fires exactly at its deadline with the CPU asleep --

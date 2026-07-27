@@ -144,6 +144,8 @@ uint32_t edgeCount() { return g_edges; }
 
 void registerFastPath(void (*fn)(uint32_t committed)) { g_fastpath = fn; }
 
+bool fastPathArmed() { return g_fastpath != nullptr; }
+
 void configSync(bool active, uint32_t window, bool releaseDebounce) {
     const uint32_t w = window < 1u ? 1u : (window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : window);
     const uint32_t save = save_and_disable_interrupts();
