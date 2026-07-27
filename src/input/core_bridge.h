@@ -31,4 +31,14 @@ namespace CoreInput {
      * millis() (monotonic). Returns the co-registered button mask.
      */
     uint32_t syncGpio(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now);
+
+    /*
+     * Turbo (auto-fire) via the DST-proven core turbo_step -- REPLACES the addon's ad-hoc software
+     * flicker (getMicro poll + LOOP_OFFSET fudge) with the fuzzed reference. `buttons` is the
+     * post-SOCD pressed mask, `turboMask` the bits with turbo enabled, `shotCount` shots/sec
+     * (2..30), `now` millis(). Returns the mask with turbo'd buttons pulsed off in their OFF phase.
+     * Phase is absolute-time (ms ticks): the rising edge is always ON (no dropped first shot) and it
+     * self-resets per button on release -- so the addon no longer tracks flicker state itself.
+     */
+    uint16_t turbo(uint16_t buttons, uint16_t turboMask, uint8_t shotCount, uint32_t now);
 }
