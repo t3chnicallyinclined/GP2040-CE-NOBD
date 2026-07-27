@@ -13,6 +13,7 @@
 #include "drivers/dreamcast/DreamcastDriver.h"
 #include "input/core_bridge.h"
 #include "input/gpio_doorbell.h"
+#include "input/latency_probe.h"   // LatencyProbe::epoch -- reset the HUD on a config swap (no-op in prod)
 #include "hardware/sync.h"   // __wfi -- A4b event-driven wake
 
 // Inputs for Core0
@@ -384,6 +385,19 @@ void GP2040::run() {
 	static repeating_timer_t wakeTimer;
 	add_repeating_timer_us(-1000, [](repeating_timer_t*) -> bool { return true; }, nullptr, &wakeTimer);
 
+	// A4b (event-driven core): in steady state -- fast path armed (the gate PROVED the ISR owns the
+	// report: output == straight-map, no addon injecting) AND no button edge since the last check --
+	// the whole input pipeline (read -> SOCD -> ~20 addons) would recompute an identical state, so we
+	// skip it. The report is already staged in DPRAM (always-armed) and the ISR ships any edge; we
+	// still pump USB + apply feature reports (rumble) + handle saves. Golden rule: the CPU does no
+	// input work in steady state -- the ISR + hardware alarm + DPRAM carry it. Disabled when a
+	// USB-host addon integrates input, since that arrives off-stack, not as a GPIO edge.
+	const auto& _addonOpts = Storage::getInstance().getAddonOptions();
+	const bool idleSkipAllowed = !dcMode && !configMode
+	                          && !_addonOpts.keyboardHostOptions.enabled
+	                          && !_addonOpts.gamepadUSBHostOptions.enabled;
+	bool primed = false;
+
 	while (1) {
 		// A4b: the XInput path sleeps here until a button edge (GPIO doorbell), the 1 ms wake
 		// tick, or a USB IRQ -- CPU asleep between events instead of busy-polling. DC mode
@@ -395,8 +409,28 @@ void GP2040::run() {
 		watchdog_update();
 		watchdog_hw->scratch[0] = 1; // C0 hang breadcrumb: loop top
 
+		// A4b: steady-state skip -- the ISR owns the report, nothing to recompute. Still pump USB
+		// (control transfers, feature reports/rumble), postprocess addons (LEDs), and handle saves.
+		if (idleSkipAllowed && primed
+		    && GpioDoorbell::fastPathArmed()
+		    && !GpioDoorbell::consumeChanged()) {
+			bool processed = inputDriver->process(gamepad);
+			tud_task();
+			addons.PostprocessAddons(processed);
+			checkSaveRebootState();
+			continue;
+		}
+
 		this->getReinitGamepad(gamepad);
 		memcpy(&prevState, &gamepad->state, sizeof(GamepadState));
+
+		// Latency HUD: reset the measurement when the latency-relevant config hot-swaps (NOBD sync
+		// on/off + delay, debounce) so the readout never mixes two configs. No-op in production.
+		{
+			const GamepadOptions& _lo = Storage::getInstance().getGamepadOptions();
+			LatencyProbe::epoch((_lo.nobdSyncDelay << 16) | (_lo.debounceDelay << 4)
+			                    | (_lo.nobdReleaseDebounce ? 1u : 0u));
+		}
 
 		if (dcMode) {
 			// NOBD is user-controllable in DC mode too — debouncedGpio feeds
@@ -459,6 +493,7 @@ void GP2040::run() {
 		checkProcessedState(processedGamepad->state, gamepad->state);
 
 		memcpy(&processedGamepad->state, &gamepad->state, sizeof(GamepadState));
+		primed = true;   // A4b: the input pipeline has produced a full state at least once
 
 		if (dcMode) {
 			dcDriver->process(gamepad);

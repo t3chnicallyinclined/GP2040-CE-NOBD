@@ -20,6 +20,8 @@ volatile uint32_t g_wmin = 0xFFFFFFFFu;
 volatile uint32_t g_wmax = 0;
 volatile uint64_t g_wsum = 0;
 volatile uint32_t g_wcnt = 0;
+
+uint32_t g_epoch = 0xFFFFFFFFu;   // last latency-config key; a change resets the stats (see epoch())
 } // namespace
 
 namespace LatencyProbe {
@@ -81,6 +83,15 @@ void wireStats(uint32_t &min_us, uint32_t &avg_us, uint32_t &max_us, uint32_t &c
 void reset() {
     g_min = 0xFFFFFFFFu; g_max = 0; g_sum = 0; g_cnt = 0; g_armed = false;
     g_wmin = 0xFFFFFFFFu; g_wmax = 0; g_wsum = 0; g_wcnt = 0; g_wire_pending = false;
+}
+
+// Reset the accumulated stats when the latency-relevant config changes. Input-mode swaps reboot (a
+// fresh boot zeroes these already), so this mainly catches a HOT NOBD-sync or debounce toggle -- the
+// HUD then reflects only the config currently in effect, never a blend of before + after.
+void epoch(uint32_t key) {
+    if (key == g_epoch) return;
+    g_epoch = key;
+    reset();
 }
 
 } // namespace LatencyProbe

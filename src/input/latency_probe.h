@@ -38,6 +38,9 @@ namespace LatencyProbe {
     void stats(uint32_t &min_us, uint32_t &avg_us, uint32_t &max_us, uint32_t &count);      // build
     void wireStats(uint32_t &min_us, uint32_t &avg_us, uint32_t &max_us, uint32_t &count);  // wire
     void reset();
+    void epoch(uint32_t key);   // reset the stats whenever `key` changes -- pass a hash of the
+                                // latency-relevant config (NOBD sync on/off + delay, debounce). A hot
+                                // swap then starts a FRESH measurement instead of mixing two configs.
 #else
     // Disabled: inline no-ops so every call site folds to nothing (no symbols, no ISR cost).
     inline void edge() {}
@@ -47,5 +50,6 @@ namespace LatencyProbe {
     inline void stats(uint32_t &mn, uint32_t &av, uint32_t &mx, uint32_t &c) { mn = av = mx = c = 0; }
     inline void wireStats(uint32_t &mn, uint32_t &av, uint32_t &mx, uint32_t &c) { mn = av = mx = c = 0; }
     inline void reset() {}
+    inline void epoch(uint32_t) {}
 #endif
 }
