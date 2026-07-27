@@ -1,0 +1,11 @@
+# Build artifacts — this is a throwaway feasibility probe; only the sources are tracked.
+build/
+*.exe
+*.uf2
+*.bin
+*.elf
+*.hex
+*.dis
+*.map
+*.obj
+*.o
