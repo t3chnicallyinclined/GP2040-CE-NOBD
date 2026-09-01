@@ -361,6 +361,8 @@ enum GpioAction
     MODE_WHEEL_PEDAL_GAS         = 128;
     MODE_WHEEL_PEDAL_BRAKE       = 129;
     MODE_WHEEL_PEDAL_CLUTCH      = 130;
+
+    NOBD_TOGGLE                  = 131;  // momentary button: edge-flips NOBD on/off (per-profile)
 }
 
 enum GpioDirection
@@ -453,6 +455,7 @@ enum GamepadHotkey
     HOTKEY_TURBO_COUNT_UP        = 75;
     HOTKEY_TURBO_COUNT_DOWN      = 76;
     HOTKEY_FOCUS_MODE_TOGGLE     = 77;
+    HOTKEY_NOBD_TOGGLE           = 78;
 }
 
 enum AnimationEffects

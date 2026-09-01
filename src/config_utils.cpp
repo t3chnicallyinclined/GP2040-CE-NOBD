@@ -130,6 +130,26 @@
     #define DEFAULT_NOBD_SYNC_DELAY 5
 #endif
 
+/*
+ * Cap on the NOBD sync window.
+ *
+ * The window is a finger-gap tolerance: it holds a press briefly so a second button
+ * pressed a moment later lands on the SAME game frame. A human two-button gap is
+ * 1-4 ms, so single-digit milliseconds is the whole useful range.
+ *
+ * Past roughly 30 ms the window outlasts the press itself, and syncGpioGetAll's
+ * `sync_new &= raw_buttons` then drops any press released before its window
+ * commits. At the old 500 ms ceiling that is nearly every input, directions
+ * included -- buttonGpios covers the whole stick, so movement stops registering.
+ * A setting that high cannot help anyone and silently breaks the stick.
+ *
+ * 16 ms matches the nobd-desktop clamp and leaves headroom over any real finger gap.
+ * The unit is milliseconds here: syncGpioGetAll multiplies by 1000 for its us clock.
+ */
+#ifndef NOBD_SYNC_DELAY_MAX
+    #define NOBD_SYNC_DELAY_MAX 16
+#endif
+
 #ifndef DEFAULT_PS4_REPORTHACK
     #define DEFAULT_PS4_REPORTHACK false
 #endif
@@ -305,6 +325,11 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.gamepadOptions, ps4ControllerType, DEFAULT_PS4CONTROLLER_TYPE);
     INIT_UNSET_PROPERTY(config.gamepadOptions, debounceDelay, DEFAULT_DEBOUNCE_DELAY);
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdSyncDelay, DEFAULT_NOBD_SYNC_DELAY);
+    // Normalise, don't just default: a config saved before this cap existed can hold
+    // up to 500. 0 stays 0 -- that is "sync off", not "a window of zero".
+    if (config.gamepadOptions.nobdSyncDelay > NOBD_SYNC_DELAY_MAX) {
+        config.gamepadOptions.nobdSyncDelay = NOBD_SYNC_DELAY_MAX;
+    }
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdReleaseDebounce, false);
     // Per-board Dreamcast pin defaults — boards that support DC define these
     // in BoardConfig.h. All others default to 0xFF (unconfigured/disabled)

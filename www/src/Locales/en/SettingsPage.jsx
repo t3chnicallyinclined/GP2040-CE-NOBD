@@ -158,6 +158,7 @@ export default {
 		'menu-nav-back': 'Menu Back',
 		'menu-nav-toggle': 'Menu Toggle',
 		'focus-mode-toggle': 'Focus Mode Toggle',
+		'nobd-toggle': 'NOBD On/Off Toggle',
 		'turbo-count-up': 'Turbo Count Up',
 		'turbo-count-down': 'Turbo Count Down',
 	},

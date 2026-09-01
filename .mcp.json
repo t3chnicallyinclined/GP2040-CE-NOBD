@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "kicad-sch-api": {
+      "command": "C:\\Users\\trist\\AppData\\Roaming\\Python\\Python313\\Scripts\\mcp-kicad-sch-api.exe"
+    },
+    "cheat-engine": {
+      "command": "python",
+      "args": [
+        "C:\\Users\\trist\\projects\\cheat-engine-server-python\\server\\main.py",
+        "--debug",
+        "--read-only"
+      ],
+      "cwd": "C:\\Users\\trist\\projects\\cheat-engine-server-python"
+    }
+  }
+}

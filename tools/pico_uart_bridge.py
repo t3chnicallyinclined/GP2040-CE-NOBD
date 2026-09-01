@@ -11,8 +11,8 @@ import socket
 import machine
 import time
 
-WIFI_SSID = "King_WiddleToes"
-WIFI_PASSWORD = "Qwerty123"
+WIFI_SSID = "YOUR_WIFI_SSID"          # set to your network name
+WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"  # set to your network password
 UDP_PORT = 4977
 BAUD = 1000000
 
