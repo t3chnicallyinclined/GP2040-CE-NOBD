@@ -4,6 +4,7 @@
  */
 
 #include "FlashPROM.h"
+#include <hardware/watchdog.h>
 
 uint8_t FlashPROM::writeCache[EEPROM_SIZE_BYTES];
 volatile static alarm_id_t flashWriteAlarm = 0;
@@ -16,8 +17,19 @@ int64_t writeToFlash(alarm_id_t id, void *flashCache)
 	multicore_lockout_start_blocking();
 	uint32_t interrupts = spin_lock_blocking(flashLock);
 
-	flash_range_erase((intptr_t)EEPROM_ADDRESS_START - (intptr_t)XIP_BASE, EEPROM_SIZE_BYTES);
-	flash_range_program((intptr_t)EEPROM_ADDRESS_START - (intptr_t)XIP_BASE, reinterpret_cast<uint8_t *>(flashCache), EEPROM_SIZE_BYTES);
+	// This runs in a Core0 timer-alarm IRQ with the main loop suspended, so the
+	// loop's watchdog_update() never fires while we're in here. A full 32KB
+	// erase can take seconds on a slow/worn flash chip, so erase sector-by-
+	// sector and feed the watchdog between each one. XIP is re-enabled by the
+	// SDK on each flash_range_erase return, so watchdog_update() is safe here.
+	// (If the watchdog isn't armed, watchdog_update() is a harmless no-op.)
+	const uint32_t base = (intptr_t)EEPROM_ADDRESS_START - (intptr_t)XIP_BASE;
+	for (uint32_t offset = 0; offset < EEPROM_SIZE_BYTES; offset += FLASH_SECTOR_SIZE) {
+		flash_range_erase(base + offset, FLASH_SECTOR_SIZE);
+		watchdog_update();
+	}
+	flash_range_program(base, reinterpret_cast<uint8_t *>(flashCache), EEPROM_SIZE_BYTES);
+	watchdog_update();
 
 	flashWriteAlarm = 0;
 

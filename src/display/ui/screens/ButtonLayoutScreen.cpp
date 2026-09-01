@@ -271,6 +271,15 @@ void ButtonLayoutScreen::generateHeader() {
 
     if (showMacroMode && macroEnabled) statusBar += " M";
 
+    // NOBD sync-window state, shown in every input mode (including Dreamcast).
+    // On: "N+<ms>" so the user sees the current window (e.g. "N+5"). Off: "N-".
+    if (options.nobdSyncDelay > 0) {
+        statusBar += " N+";
+        statusBar += std::to_string(options.nobdSyncDelay);
+    } else {
+        statusBar += " N-";
+    }
+
     if (showProfileMode) {
         statusBar += " ";
 

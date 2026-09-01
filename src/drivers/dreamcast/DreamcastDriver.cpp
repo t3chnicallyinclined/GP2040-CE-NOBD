@@ -580,8 +580,13 @@ void __no_inline_not_in_flash_func(DreamcastDriver::updateCmd9FromNetwork)(uint3
 // ============================================================
 
 void DreamcastDriver::initEthernet(uint pin_miso, uint pin_cs, uint pin_sclk, uint pin_mosi, uint pin_rst) {
-    // Init W6100 — skip version check, just configure and go
-    w6100_init(pin_miso, pin_cs, pin_sclk, pin_mosi, pin_rst);
+    // Only proceed if a W6100 is actually detected. w6100_init returns false
+    // (before its blocking DHCP loop) when no chip answers, so Dreamcast mode
+    // works normally on boards without Ethernet instead of freezing at init.
+    if (!w6100_init(pin_miso, pin_cs, pin_sclk, pin_mosi, pin_rst)) {
+        ethernetInitialized = false;
+        return;
+    }
     ethernetChipVersion = w6100_get_version();
 
     uint8_t mac[6] = {0x00, 0x08, 0xDC, 0xDC, 0x00, 0x01};

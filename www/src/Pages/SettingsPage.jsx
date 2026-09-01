@@ -339,6 +339,7 @@ const HOTKEY_ACTIONS = [
 	{ labelKey: 'hotkey-actions.menu-nav-back', value: 49 },
 	{ labelKey: 'hotkey-actions.menu-nav-toggle', value: 50 },
 	{ labelKey: 'hotkey-actions.focus-mode-toggle', value: 77 },
+	{ labelKey: 'hotkey-actions.nobd-toggle', value: 78 },
 ];
 
 const FORCED_SETUP_MODES = [
@@ -457,10 +458,17 @@ const schema = yup.object().shape({
 		.oneOf(AUTHENTICATION_TYPES.map((o) => o.value))
 		.label('X-Input Authentication Type'),
 	debounceDelay: yup.number().required().label('Debounce Delay'),
-	nobdSyncDelay: yup.number().required().min(0).max(500).label('NOBD Sync Delay'),
+	// Capped at 16 ms, not 500: the window is a finger-gap tolerance and a human
+	// two-button gap is 1-4 ms. Past ~30 ms the window outlasts the press and
+	// syncGpioGetAll drops it, directions included. Mirrors NOBD_SYNC_DELAY_MAX
+	// in config_utils.cpp. 0 stays valid: it means sync off.
+	nobdSyncDelay: yup.number().required().min(0).max(16).label('NOBD Sync Delay'),
 	nobdReleaseDebounce: yup.number().label('NOBD Release Debounce'),
-	dreamcastPinA: yup.number().min(0).max(29).label('Dreamcast Pin A'),
-	dreamcastPinB: yup.number().min(0).max(29).label('Dreamcast Pin B'),
+	// 255 (0xFF) is the "disabled/unconfigured" sentinel (matches firmware default
+	// and the P2 pins below). Capping at 29 wrongly rejected boards that aren't using
+	// Dreamcast, blocking the entire Input Settings save. See issue #8.
+	dreamcastPinA: yup.number().min(0).max(255).label('Dreamcast Pin A'),
+	dreamcastPinB: yup.number().min(0).max(255).label('Dreamcast Pin B'),
 	dreamcastP2PinA: yup.number().min(0).max(255).label('Dreamcast P2 Pin A'),
 	dreamcastP2PinB: yup.number().min(0).max(255).label('Dreamcast P2 Pin B'),
 	dreamcastUartRxPin: yup.number().min(0).max(255).label('Dreamcast UART RX Pin'),
@@ -1945,7 +1953,7 @@ export default function SettingsPage() {
 																	disabled={values.inputMode === 16 || (values.nobdSyncDelay === 0 && values.debounceDelay === 0)}
 																	onChange={handleChange}
 																	min={1}
-																	max={500}
+																	max={16}
 																/>
 															) : (
 																<Form.Control
