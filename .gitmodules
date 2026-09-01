@@ -1,6 +1,6 @@
 [submodule "lib/tinyusb"]
 	path = lib/tinyusb
-	url = https://github.com/OpenStickCommunity/tinyusb.git
+	url = https://github.com/t3chnicallyinclined/tinyusb.git
 [submodule "lib/pico_pio_usb"]
 	path = lib/pico_pio_usb
 	url = https://github.com/OpenStickCommunity/Pico-PIO-USB.git
