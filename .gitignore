@@ -58,3 +58,6 @@ docs/MAPLECAST-ARCHITECTURE.md
 docs/WORKSTREAM-SERVERSYNC.md
 docs/GP-RETRO-ONLINE-MVP.md
 docs/W6100-SETUP-GUIDE.md
+# host-built differential harness (test/sync_diff_harness.c)
+dh.exe
+dh.pdb
