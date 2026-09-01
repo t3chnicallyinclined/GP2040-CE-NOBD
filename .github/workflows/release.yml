@@ -15,7 +15,31 @@ env:
   BUILD_TYPE: Release
 
 jobs:
+  # Releases are cut from main. main is the integration point: work merges there,
+  # then the tag is pushed on main. This gate exists because the two lines silently
+  # diverged once already -- every firmware change and every release tag lived on
+  # w6100-evb-pico2 while main carried only docs, so `main` did not describe the
+  # shipped product. Fail loudly here rather than ship a tag nobody can find on main.
+  guard-tag-on-main:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Refuse to release a tag that is not on main
+        run: |
+          REF="${{ inputs.tag || github.ref_name }}"
+          echo "Releasing: $REF"
+          if git merge-base --is-ancestor "$REF" origin/main; then
+            echo "OK: $REF is on main."
+          else
+            echo "::error::$REF is not an ancestor of main. Merge to main first, then tag main."
+            exit 1
+          fi
+
   build-web:
+    needs: guard-tag-on-main
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6.0.2
