@@ -228,6 +228,7 @@ void GP2040::setup() {
 void GP2040::initializeStandardGpio() {
 	GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
 	buttonGpios = 0;
+	dirGpios = 0;
 
 	// Reserve Dreamcast Maple Bus pins so they aren't configured as
 	// button inputs when DC mode is active (PIO owns them).
@@ -257,6 +258,11 @@ void GP2040::initializeStandardGpio() {
 			gpio_set_dir(pin, GPIO_IN); // Set as INPUT
 			gpio_pull_up(pin);          // Set as PULLUP
 			buttonGpios |= 1 << pin;    // mark this pin as mattering for GPIO debouncing
+			// UP/DOWN/LEFT/RIGHT are BUTTON_PRESS_UP..RIGHT == 1..4 in enums.proto.
+			if (pinMappings[pin].action >= GpioAction::BUTTON_PRESS_UP &&
+			    pinMappings[pin].action <= GpioAction::BUTTON_PRESS_RIGHT) {
+				dirGpios |= 1 << pin;
+			}
 		}
 	}
 
@@ -314,6 +320,31 @@ void __not_in_flash_func(GP2040::debounceGpioGetAll)() {
 	}
 }
 
+/*
+ * Translate GamepadOptions into the core's SyncPolicy. One place, so the loop path
+ * (syncGpioGetAll) and the ISR path (GpioDoorbell) cannot drift apart.
+ *
+ * DIRECTIONS: by default they no longer enter the window. The window is a co-registration
+ * stage for near-simultaneous BUTTON presses; a lever sweeping through a zone occupies it
+ * for 1-3 ms, far inside any usable window, so putting movement through it drops or fuses
+ * direction taps and taxes every movement input for nothing. Co-registering a direction WITH
+ * a button is not worth buying either: at 60 fps a frame is 16,700 us and the window at most
+ * 16,000, so they land on the same frame regardless. Set nobdSyncDirections to restore the
+ * old behaviour.
+ */
+CoreInput::SyncPolicy GP2040::nobdSyncPolicy() const {
+	const GamepadOptions& o = Storage::getInstance().getGamepadOptions();
+	CoreInput::SyncPolicy p{};
+	p.window          = o.nobdSyncDelay;
+	p.releaseDebounce = o.nobdReleaseDebounce;
+	// 0 would mean "all pins", so only narrow the mask when we actually mean to.
+	p.syncedMask      = o.nobdSyncDirections ? 0u : (uint32_t)(buttonGpios & ~dirGpios);
+	p.attackMask      = (uint32_t)(buttonGpios & ~dirGpios);
+	p.eagerCommit     = o.nobdEagerCommit;
+	p.preserveWidth   = o.nobdPreserveWidth;
+	return p;
+}
+
 void __not_in_flash_func(GP2040::syncGpioGetAll)() {
 	Mask_t raw_gpio = ~gpio_get_all();
 	Gamepad* gamepad = Storage::getInstance().GetGamepad();
@@ -328,7 +359,7 @@ void __not_in_flash_func(GP2040::syncGpioGetAll)() {
 	// ad-hoc impl for realistic input by test/sync_equiv.c, and the core fixes the
 	// release_debounce "never releases" bug the old one shared with the spec.
 	gamepad->debouncedGpio = CoreInput::syncGpio(raw_gpio & buttonGpios,
-	                                             nobdSyncDelay, releaseDebounce, getMillis());
+	                                             nobdSyncPolicy(), getMillis());
 }
 
 // Set each loop: did any addon (turbo/macro/...) modify the report this frame? The XInput ISR
@@ -447,8 +478,7 @@ void GP2040::run() {
 			// Stage 4: the doorbell/ISR owns the sync window now. Configure it and read its
 			// committed mask -- the whole system honors the SAME ISR-owned co-registration, and
 			// the commit fires from a hardware alarm (deterministic, CPU asleep), not the loop.
-			const GamepadOptions& o = Storage::getInstance().getGamepadOptions();
-			GpioDoorbell::configSync(true, o.nobdSyncDelay, o.nobdReleaseDebounce);
+			GpioDoorbell::configSync(true, nobdSyncPolicy());
 			GpioDoorbell::configDebounce(false, 0);      // sync owns the front stage
 			gamepad->debouncedGpio = GpioDoorbell::committed();
 		} else {
@@ -456,7 +486,10 @@ void GP2040::run() {
 			// debounceGpioGetAll -- a clean press lands in ~1us instead of ~70us). delay==0 => the
 			// ISR passes pins straight through, same as before.
 			const uint32_t dd = Storage::getInstance().getGamepadOptions().debounceDelay;
-			GpioDoorbell::configSync(false, 0, false);
+			// Sync is off in this branch, so the policy is never consulted. Window still has to be
+			// >= 1: the core asserts 1..SYNC_WINDOW_MAX on first init and a 0 would trip it.
+			const CoreInput::SyncPolicy off{ 1u, false, 0u, 0u, 0u, false };
+			GpioDoorbell::configSync(false, off);
 			GpioDoorbell::configDebounce(dd > 0, dd);
 			gamepad->debouncedGpio = GpioDoorbell::committed();
 		}

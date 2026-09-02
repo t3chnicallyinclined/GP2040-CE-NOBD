@@ -13,6 +13,9 @@
 #pragma once
 #include <stdint.h>
 
+// SyncPolicy lives with the core bridge; the doorbell publishes the same struct.
+#include "core_bridge.h"
+
 namespace GpioDoorbell {
     // Arm edge IRQs on every pin set in buttonMask; disable them on all others. Idempotent
     // (safe to call again on a profile/mode re-init -- it re-derives from the new mask).
@@ -42,7 +45,7 @@ namespace GpioDoorbell {
     // one-pulse hardware alarm, so a commit fires exactly at its deadline with the CPU asleep --
     // instead of the loop noticing it ~50us later. Configure it from the loop each iteration
     // (cheap, preserves state); active=false => the ISR passes pins straight through.
-    void configSync(bool active, uint32_t window, bool releaseDebounce);
+    void configSync(bool active, const CoreInput::SyncPolicy& policy);
 
     // The current committed pressed mask (post sync/debounce). The loop reads this into
     // debouncedGpio so the whole system (USB report, display, addons) honors the SAME ISR-owned

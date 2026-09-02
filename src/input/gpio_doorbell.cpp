@@ -146,13 +146,22 @@ void registerFastPath(void (*fn)(uint32_t committed)) { g_fastpath = fn; }
 
 bool fastPathArmed() { return g_fastpath != nullptr; }
 
-void configSync(bool active, uint32_t window, bool releaseDebounce) {
-    const uint32_t w = window < 1u ? 1u : (window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : window);
+void configSync(bool active, const CoreInput::SyncPolicy& policy) {
+    const uint32_t w = policy.window < 1u ? 1u
+                     : (policy.window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : policy.window);
+    // s_sync is stepped by the edge ISR and the alarm ISR, so publishing policy must be atomic
+    // with respect to both -- a half-updated mask would be read by the very next button edge.
     const uint32_t save = save_and_disable_interrupts();
-    if (!s_syncInited) { sync_window_init(&s_sync, w, releaseDebounce); s_syncInited = true; }
-    s_sync.window          = w;               // dynamic, like the incumbent re-read each call
-    s_sync.release_debounce = releaseDebounce;
-    s_syncActive           = active;
+    if (!s_syncInited) { sync_window_init(&s_sync, w, policy.releaseDebounce); s_syncInited = true; }
+    s_sync.window           = w;              // dynamic, like the incumbent re-read each call
+    s_sync.release_debounce = policy.releaseDebounce;
+    s_sync.synced_mask      = (buttons_t)policy.syncedMask;
+    s_sync.attack_mask      = (buttons_t)policy.attackMask;
+    s_sync.commit_at        = policy.eagerCommit;
+    // See core_bridge.cpp: asserts are compiled out in Release, so resolve the two release
+    // policies here instead of letting preserve_width silently win.
+    s_sync.preserve_width   = policy.preserveWidth && !policy.releaseDebounce;
+    s_syncActive            = active;
     restore_interrupts(save);
 }
 

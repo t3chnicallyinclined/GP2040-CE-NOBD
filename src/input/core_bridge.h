@@ -30,7 +30,29 @@ namespace CoreInput {
      * pressed-button GPIO mask; window is nobdSyncDelay in ms (clamped 1..500); now is
      * millis() (monotonic). Returns the co-registered button mask.
      */
-    uint32_t syncGpio(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now);
+    /*
+     * How the sync window should behave. Grouped into a struct rather than eight positional
+     * arguments, and built once per loop by GP2040::syncGpioGetAll from GamepadOptions.
+     *
+     * syncedMask / attackMask are two DIFFERENT questions and must not be conflated:
+     *   syncedMask  which pins the window may DELAY. Excluding directions keeps a lever sweep
+     *               (1-3 ms in a zone) out of a stage that would drop or fuse it, and stops
+     *               every movement input paying the window for nothing.
+     *   attackMask  which pins mean "a chord is forming", for eagerCommit. Without it, eager
+     *               commit fires on direction+button and disables the window for anything
+     *               that moves.
+     * 0 means "all pins" for either, so a zeroed policy is the classic behaviour.
+     */
+    struct SyncPolicy {
+        uint32_t window;          // ms; 0 is not valid here, the caller clamps
+        bool     releaseDebounce;
+        uint32_t syncedMask;      // 0 = every pin is subject to the window
+        uint32_t attackMask;      // 0 = every pin counts toward eagerCommit
+        uint32_t eagerCommit;     // 0 = ride out the window; N>=2 = commit at N pending
+        bool     preserveWidth;   // delay each release by the delay its own press incurred
+    };
+
+    uint32_t syncGpio(uint32_t rawButtons, const SyncPolicy& policy, uint32_t now);
 
     /*
      * Turbo (auto-fire) via the DST-proven core turbo_step -- REPLACES the addon's ad-hoc software

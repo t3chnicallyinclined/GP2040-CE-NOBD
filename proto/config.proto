@@ -40,6 +40,16 @@ message GamepadOptions
     optional InputModeDeviceType inputDeviceType = 33;
     optional uint32 nobdSyncDelay = 34;
     optional bool nobdReleaseDebounce = 35;
+    // NOBD co-registration policy. See GP2040::nobdSyncPolicy() for the reasoning.
+    // nobdSyncDirections: put movement back INTO the window (off by default -- a lever sweep
+    //   is 1-3 ms, far inside any window, so syncing directions drops or fuses them).
+    // nobdEagerCommit: commit as soon as N attack buttons are pending instead of always
+    //   riding out the window. 0 = off.
+    // nobdPreserveWidth: hold each release back by the delay its own press incurred, so the
+    //   game sees the width the player made.
+    optional bool nobdSyncDirections = 52;
+    optional uint32 nobdEagerCommit = 53;
+    optional bool nobdPreserveWidth = 54;
     optional uint32 dreamcastPinA = 36;
     optional uint32 dreamcastPinB = 37;
     optional uint32 dcSyncMode = 38;
