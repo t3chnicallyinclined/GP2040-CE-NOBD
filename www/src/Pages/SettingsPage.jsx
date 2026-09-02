@@ -2004,6 +2004,7 @@ export default function SettingsPage() {
 															</Form.Text>
 														</Col>
 													</Form.Group>
+													)}
 													{values.nobdSyncDelay > 0 && values.inputMode !== 16 && (
 													<Form.Group className="row mb-3">
 														<Col sm={8}>
@@ -2060,7 +2061,6 @@ export default function SettingsPage() {
 															</Form.Text>
 														</Col>
 													</Form.Group>
-													)}
 													)}
 													<Form.Group className="row mb-5">
 														<Col sm={5}>
