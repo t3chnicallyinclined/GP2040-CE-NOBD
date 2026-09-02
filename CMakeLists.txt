@@ -45,7 +45,20 @@ execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --abbrev=7
 string(REGEX REPLACE "v([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" CMAKE_GIT_REPO_VERSION ${GIT_REPO_VERSION})
 string(REGEX REPLACE "^(.......-.*)|(.......)$" "0.0.0" CMAKE_GIT_REPO_VERSION ${CMAKE_GIT_REPO_VERSION}) # fix if all we have is the git SHA
 # NOBD Release Version — update this number before each release build
-set(NOBD_RELEASE "23")
+# The NOBD release number baked into the uf2 filename, the OLED and the web UI.
+#
+# Overridable, because it was NOT. It sat hardcoded at "23" while v0.7.12-nobd-24 was tagged
+# and published, so that release shipped five assets all named ..._0.7.12-nobd-23_*.uf2 and
+# reported nobd-23 on the device. A release whose artefacts claim to be the previous release
+# is unsupportable: nobody can tell from a stick which build is on it.
+#
+# CI now passes -DNOBD_RELEASE from the tag (see .github/workflows/release.yml), so the tag is
+# the single source of truth. The literal below is only the local-build fallback.
+if(DEFINED ENV{NOBD_RELEASE})
+  set(NOBD_RELEASE $ENV{NOBD_RELEASE})
+elseif(NOT DEFINED NOBD_RELEASE)
+  set(NOBD_RELEASE "25")
+endif()
 set(GIT_REPO_VERSION "v${CMAKE_GIT_REPO_VERSION}-nobd-${NOBD_RELEASE}")
 
 configure_file("headers/version.h.in" "headers/version.h")
