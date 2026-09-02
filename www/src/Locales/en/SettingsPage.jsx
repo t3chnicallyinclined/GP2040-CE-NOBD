@@ -72,6 +72,15 @@ export default {
 	'input-timing-nobd-hint': 'Groups near-simultaneous button presses into a single frame. All presses within the sync window are committed together. Designed for fighting games on USB where 1ms polling can split dashes and throw techs across frames.',
 	'nobd-release-debounce-label': 'Release Debounce',
 	'nobd-release-debounce-hint': 'Debounces button releases using the sync window timer. Recommended for rhythm games (Guitar Hero, Cadence of Hyrule, etc.) to prevent phantom inputs from switch bounce on release. Not needed for fighting games.',
+	'nobd-dirs-out-label': 'Keep directions out of the sync window',
+	'nobd-dirs-out-hint':
+		'The window groups near-simultaneous BUTTON presses. A lever sweeping through a zone sits in it for only 1-3 ms, so putting movement through the window drops or fuses direction taps and delays every movement input. Leave this on unless you specifically want directions co-registered.',
+	'nobd-preserve-width-label': 'Preserve pulse width',
+	'nobd-preserve-width-hint':
+		'Hold each release back by the same delay its own press was held, so the game sees a press for as long as you actually held it. Without this every press reaches the game up to one window shorter than you made it.',
+	'nobd-eager-commit-label': 'Fire as soon as the chord is complete',
+	'nobd-eager-commit-hint':
+		'Send both buttons the instant the second one lands, instead of always waiting out the full window. Your dash arrives at your own finger gap rather than at the deadline. A third button pressed inside the window still joins the same frame.',
 	'mini-menu-gamepad-input': 'Use Gamepad Input for Display Mini Menu',
 	'ps4-mode-explanation-text':
 		'PS4 mode allows GP2040-CE to run as an authenticated PS4 controller.',

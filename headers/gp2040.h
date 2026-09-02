@@ -16,6 +16,8 @@
 
 #include "pico/types.h"
 
+#include "input/core_bridge.h"
+
 class GP2040 {
 public:
     GP2040(){}
@@ -28,10 +30,15 @@ private:
     // GPIO debouncer (stock GP2040-CE per-pin debounce)
     void debounceGpioGetAll();
     Mask_t buttonGpios;
+    // The subset of buttonGpios mapped to UP/DOWN/LEFT/RIGHT. Built alongside buttonGpios so the
+    // sync window can be told which pins are movement and which are attacks -- it cannot tell
+    // from a raw GPIO mask, and the two want opposite treatment.
+    Mask_t dirGpios;
     uint32_t gpioDebounceTime[NUM_BANK0_GPIOS];
 
     // NOBD sync window (groups near-simultaneous presses)
     void syncGpioGetAll();
+    CoreInput::SyncPolicy nobdSyncPolicy() const;
 
     struct RebootHotkeys {
         RebootHotkeys();

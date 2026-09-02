@@ -666,6 +666,9 @@ std::string setGamepadOptions()
     readDoc(gamepadOptions.debounceDelay, doc, "debounceDelay");
     readDoc(gamepadOptions.nobdSyncDelay, doc, "nobdSyncDelay");
     readDoc(gamepadOptions.nobdReleaseDebounce, doc, "nobdReleaseDebounce");
+    readDoc(gamepadOptions.nobdSyncDirections, doc, "nobdSyncDirections");
+    readDoc(gamepadOptions.nobdEagerCommit, doc, "nobdEagerCommit");
+    readDoc(gamepadOptions.nobdPreserveWidth, doc, "nobdPreserveWidth");
     readDoc(gamepadOptions.dreamcastPinA, doc, "dreamcastPinA");
     readDoc(gamepadOptions.dreamcastPinB, doc, "dreamcastPinB");
     readDoc(gamepadOptions.dreamcastP2PinA, doc, "dreamcastP2PinA");
@@ -753,6 +756,9 @@ std::string getGamepadOptions()
     writeDoc(doc, "debounceDelay", gamepadOptions.debounceDelay);
     writeDoc(doc, "nobdSyncDelay", gamepadOptions.nobdSyncDelay);
     writeDoc(doc, "nobdReleaseDebounce", gamepadOptions.nobdReleaseDebounce ? 1 : 0);
+    writeDoc(doc, "nobdSyncDirections", gamepadOptions.nobdSyncDirections ? 1 : 0);
+    writeDoc(doc, "nobdEagerCommit", gamepadOptions.nobdEagerCommit);
+    writeDoc(doc, "nobdPreserveWidth", gamepadOptions.nobdPreserveWidth ? 1 : 0);
     writeDoc(doc, "dreamcastPinA", gamepadOptions.dreamcastPinA);
     writeDoc(doc, "dreamcastPinB", gamepadOptions.dreamcastPinB);
     writeDoc(doc, "dreamcastP2PinA", gamepadOptions.dreamcastP2PinA);

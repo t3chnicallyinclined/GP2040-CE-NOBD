@@ -331,6 +331,20 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
         config.gamepadOptions.nobdSyncDelay = NOBD_SYNC_DELAY_MAX;
     }
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdReleaseDebounce, false);
+    // Directions stay OUT of the sync window by default. This is a deliberate behaviour change:
+    // the window is co-registration for near-simultaneous button presses, and a lever sweeping
+    // through a zone occupies it 1-3 ms, so movement through the window was being dropped or
+    // fused. Set nobdSyncDirections to restore the old behaviour.
+    INIT_UNSET_PROPERTY(config.gamepadOptions, nobdSyncDirections, false);
+    // Eager commit on 2 attacks. Safe to default on ONLY because the core opens a grace period
+    // to the original deadline, so a third button still joins the chord instead of landing a
+    // frame late -- without that, this would split every 3-button input.
+    INIT_UNSET_PROPERTY(config.gamepadOptions, nobdEagerCommit, 2);
+    INIT_UNSET_PROPERTY(config.gamepadOptions, nobdPreserveWidth, true);
+    // Two different release policies; release_debounce wins if someone set both.
+    if (config.gamepadOptions.nobdReleaseDebounce) {
+        config.gamepadOptions.nobdPreserveWidth = false;
+    }
     // Per-board Dreamcast pin defaults — boards that support DC define these
     // in BoardConfig.h. All others default to 0xFF (unconfigured/disabled)
     // to prevent initializing PIO on unsafe pins (e.g. SMPS/VBUS on Pico).

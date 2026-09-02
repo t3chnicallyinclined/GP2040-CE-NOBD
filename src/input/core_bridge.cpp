@@ -46,13 +46,23 @@ uint8_t __not_in_flash_func(cleanDpad)(SOCDMode mode, uint8_t dpad) {
     return (uint8_t)(cleaned & 0x0Fu);
 }
 
-uint32_t __not_in_flash_func(syncGpio)(uint32_t rawButtons, uint32_t window, bool releaseDebounce, uint32_t now) {
+uint32_t __not_in_flash_func(syncGpio)(uint32_t rawButtons, const SyncPolicy& policy, uint32_t now) {
     static sync_window_t sw;
     static bool sw_inited = false;
-    uint32_t w = window < 1u ? 1u : (window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : window);
-    if (!sw_inited) { sync_window_init(&sw, w, releaseDebounce); sw_inited = true; }
-    sw.window = w;                       /* dynamic: the incumbent re-read nobdSyncDelay each call */
-    sw.release_debounce = releaseDebounce;
+    const uint32_t w = policy.window < 1u ? 1u
+                     : (policy.window > SYNC_WINDOW_MAX ? SYNC_WINDOW_MAX : policy.window);
+    if (!sw_inited) { sync_window_init(&sw, w, policy.releaseDebounce); sw_inited = true; }
+    /* Every field is re-seated each call: the incumbent re-read nobdSyncDelay every loop, so a
+     * web-config change or a hotkey takes effect immediately rather than at the next reboot. */
+    sw.window           = w;
+    sw.release_debounce = policy.releaseDebounce;
+    sw.synced_mask      = (buttons_t)policy.syncedMask;
+    sw.attack_mask      = (buttons_t)policy.attackMask;
+    sw.commit_at        = policy.eagerCommit;
+    /* release_debounce and preserve_width are two different release policies. The core asserts
+     * they are not both on, but asserts are compiled out in Release (-DNDEBUG), so resolve it
+     * here rather than letting preserve_width silently win inside step(). */
+    sw.preserve_width   = policy.preserveWidth && !policy.releaseDebounce;
     return (uint32_t)sync_window_step(&sw, now, (buttons_t)rawButtons);
 }
 

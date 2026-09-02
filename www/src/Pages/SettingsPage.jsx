@@ -464,6 +464,9 @@ const schema = yup.object().shape({
 	// in config_utils.cpp. 0 stays valid: it means sync off.
 	nobdSyncDelay: yup.number().required().min(0).max(16).label('NOBD Sync Delay'),
 	nobdReleaseDebounce: yup.number().label('NOBD Release Debounce'),
+	nobdSyncDirections: yup.number().label('NOBD Sync Directions'),
+	nobdEagerCommit: yup.number().min(0).max(4).label('NOBD Eager Commit'),
+	nobdPreserveWidth: yup.number().label('NOBD Preserve Pulse Width'),
 	// 255 (0xFF) is the "disabled/unconfigured" sentinel (matches firmware default
 	// and the P2 pins below). Capping at 29 wrongly rejected boards that aren't using
 	// Dreamcast, blocking the entire Input Settings save. See issue #8.
@@ -2001,6 +2004,63 @@ export default function SettingsPage() {
 															</Form.Text>
 														</Col>
 													</Form.Group>
+													{values.nobdSyncDelay > 0 && values.inputMode !== 16 && (
+													<Form.Group className="row mb-3">
+														<Col sm={8}>
+															<Form.Check
+																label={t('SettingsPage:nobd-dirs-out-label')}
+																type="switch"
+																id="nobdSyncDirections"
+																isInvalid={false}
+																checked={!Boolean(values.nobdSyncDirections)}
+																onChange={(e) => {
+																	setFieldValue('nobdSyncDirections', e.target.checked ? 0 : 1);
+																}}
+															/>
+															<Form.Text muted>
+																{t('SettingsPage:nobd-dirs-out-hint')}
+															</Form.Text>
+														</Col>
+													</Form.Group>
+													)}
+													{values.nobdSyncDelay > 0 && values.inputMode !== 16 && (
+													<Form.Group className="row mb-3">
+														<Col sm={8}>
+															<Form.Check
+																label={t('SettingsPage:nobd-preserve-width-label')}
+																type="switch"
+																id="nobdPreserveWidth"
+																isInvalid={false}
+																checked={Boolean(values.nobdPreserveWidth)}
+																onChange={(e) => {
+																	setFieldValue('nobdPreserveWidth', e.target.checked ? 1 : 0);
+																}}
+															/>
+															<Form.Text muted>
+																{t('SettingsPage:nobd-preserve-width-hint')}
+															</Form.Text>
+														</Col>
+													</Form.Group>
+													)}
+													{values.nobdSyncDelay > 0 && values.inputMode !== 16 && (
+													<Form.Group className="row mb-3">
+														<Col sm={8}>
+															<Form.Check
+																label={t('SettingsPage:nobd-eager-commit-label')}
+																type="switch"
+																id="nobdEagerCommit"
+																isInvalid={false}
+																checked={values.nobdEagerCommit > 0}
+																onChange={(e) => {
+																	setFieldValue('nobdEagerCommit', e.target.checked ? 2 : 0);
+																}}
+															/>
+															<Form.Text muted>
+																{t('SettingsPage:nobd-eager-commit-hint')}
+															</Form.Text>
+														</Col>
+													</Form.Group>
+													)}
 													)}
 													<Form.Group className="row mb-5">
 														<Col sm={5}>
