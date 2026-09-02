@@ -1,18 +1,17 @@
 #include "addons/turbo.h"
 
 #include "hardware/adc.h"
+#include "input/core_bridge.h"
 
 #include "storagemanager.h"
 #include "helper.h"
 #include "config.pb.h"
 
 #include <algorithm>
-#include <cmath>
 
 #define TURBO_SHOT_MIN 2
 #define TURBO_SHOT_MAX 30
 #define TURBO_DIAL_INCREMENTS (0xFFF / (TURBO_SHOT_MAX - TURBO_SHOT_MIN)) // 12-bit ADC
-#define TURBO_LOOP_OFFSET 50 // Extra time to compensate for loop runtime variance, turbo lags a bit otherwise
 
 #ifndef TURBO_LED_STATE_OFF
 #define TURBO_LED_STATE_OFF 0
@@ -102,8 +101,6 @@ void TurboInput::setup(){
     incrementValue = 0;
     lastPressed = 0;
     lastDpad = 0;
-    bTurboFlicker = false;
-    nextTimer = getMicro();
     encoderValue = shotCount;
     updateTurboShotCount(shotCount, false);
 }
@@ -146,9 +143,6 @@ void TurboInput::process()
             if (options.shmupModeEnabled) {
                 turboButtonsMask |= alwaysEnabled;  // SHMUP Always-on Buttons Set
             }
-
-            // Reset Turbo flicker on a new button press
-            bTurboFlicker = false;
         }
 
         if (dpadPressed & GAMEPAD_MASK_DOWN && (lastDpad != dpadPressed)) {
@@ -178,7 +172,7 @@ void TurboInput::process()
         }
     }
 
-    uint64_t now = getMicro();
+    uint32_t now = getMillis();
 
     // Use the dial to modify our turbo shot speed (don't save on dial modify)
     if (hasShmupDial && nextAdcRead < now) {
@@ -188,53 +182,42 @@ void TurboInput::process()
         if (shotCount != options.shotCount) {
             updateTurboShotCount(shotCount, false);
         }
-        nextAdcRead = now + 100000; // Sample every 100ms
+        nextAdcRead = now + 100; // Sample every 100ms
     }
 
-    // Check if we've reached the next timer right before applying turbo state
-    if (nextTimer < now) {
-        bTurboFlicker ^= true;
-        nextTimer = now + uIntervalUS - TURBO_LOOP_OFFSET;
-    }
-
-    // Set TURBO LED
-    // OFF: No turbo buttons enabled
-    // ON: 1 or more turbo buttons enabled
-    // BLINK: OFF on turbo shot, ON on turbo flicker
-    Gamepad * processedGamepad = Storage::getInstance().GetProcessedGamepad();
-    if (turboButtonsMask) {
-        if (gamepad->state.buttons & turboButtonsMask)
-            processedGamepad->auxState.turbo.activity = bTurboFlicker ? TURBO_LED_STATE_ON : TURBO_LED_STATE_OFF;
-        else
-            processedGamepad->auxState.turbo.activity = TURBO_LED_STATE_ON;
-    } else {
-        processedGamepad->auxState.turbo.activity = TURBO_LED_STATE_OFF;
-    }
-
-    // PWM LED Pin
-    if ( hasLedPin ) {
-        if ( processedGamepad->auxState.turbo.activity == TURBO_LED_STATE_ON ) {
-            gpio_put(options.ledPin, TURBO_LED_STATE_ON);
-        } else {
-            gpio_put(options.ledPin, TURBO_LED_STATE_OFF);
-        }
-    }
-
-    // Button updates
-    lastButtons = gamepad->state.buttons;
-
-    // set charge buttons (mix mode)
+    // Charge buttons (SHMUP): inject BEFORE turbo so they take part in the pulse decision.
     if (options.shmupModeEnabled) {
         gamepad->state.buttons |= chargeState;  // Inject Mask into button states
     }
 
-    // Disable button during turbo flicker
-    if (bTurboFlicker) {
-        if ( options.shmupModeEnabled && options.shmupMixMode == SHMUP_MIX_MODE_CHARGE_PRIORITY) {
-            gamepad->state.buttons &= ~(turboButtonsMask & ~(chargeState));  // Do not flicker charge buttons
-        } else {
-            gamepad->state.buttons &= ~(turboButtonsMask);
-        }
+    // Auto-fire via the DST-proven core (core/turbo.c) -- REPLACES the old software flicker timer
+    // (getMicro poll + LOOP_OFFSET fudge) with the fuzzed reference. Phase is absolute-time, so the
+    // rising edge is always ON. In SHMUP charge-priority the charge buttons must NOT pulse, so they
+    // are excluded from the turbo set.
+    const uint16_t heldTurbo = gamepad->state.buttons & turboButtonsMask;
+    const uint16_t effMask =
+        (options.shmupModeEnabled && options.shmupMixMode == SHMUP_MIX_MODE_CHARGE_PRIORITY)
+            ? (uint16_t)(turboButtonsMask & ~chargeState)
+            : turboButtonsMask;
+    const uint16_t gated    = CoreInput::turbo(gamepad->state.buttons, effMask, options.shotCount, now);
+    const bool     offPulse = (heldTurbo & ~gated) != 0;   // a held turbo button is OFF this instant
+    lastButtons = gamepad->state.buttons;
+    gamepad->state.buttons = gated;
+
+    // Turbo LED -- OFF: none enabled; solid ON: enabled but idle; BLINK while auto-firing (ON during
+    // the OFF pulse, matching the incumbent's phase).
+    Gamepad * processedGamepad = Storage::getInstance().GetProcessedGamepad();
+    if (!turboButtonsMask) {
+        processedGamepad->auxState.turbo.activity = TURBO_LED_STATE_OFF;
+    } else if (!heldTurbo) {
+        processedGamepad->auxState.turbo.activity = TURBO_LED_STATE_ON;
+    } else {
+        processedGamepad->auxState.turbo.activity = offPulse ? TURBO_LED_STATE_ON : TURBO_LED_STATE_OFF;
+    }
+    if ( hasLedPin ) {
+        gpio_put(options.ledPin,
+                 processedGamepad->auxState.turbo.activity == TURBO_LED_STATE_ON
+                     ? TURBO_LED_STATE_ON : TURBO_LED_STATE_OFF);
     }
 }
 
@@ -248,6 +231,4 @@ void TurboInput::updateTurboShotCount(uint8_t shotCount, bool save) {
   if (save) {
     EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
   }
-
-  uIntervalUS = (uint32_t)std::floor(1000000.0 / (shotCount * 2));
 }
