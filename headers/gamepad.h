@@ -36,6 +36,9 @@ public:
 	void setup();
 	void reinit();
 	void process();
+	// debouncedGpio with the 4 direction pins overwritten by the SOCD-cleaned dpad, so a
+	// pin-indexed reflector (Dreamcast CMD9) honors SOCD-once exactly like USB does.
+	uint32_t socdCleanedGpio() const;
 	void read();
 	void save();
 
@@ -131,6 +134,9 @@ public:
 
 	const GamepadOptions& getOptions() const { return options; }
 	const DpadMode getActiveDpadMode() { return activeDpadMode; }
+	// Effective 4-way state = configured mode XOR the runtime 48-way toggle pin. Public so the
+	// XInput ISR-fast-path gate can check it (the toggle member itself is private).
+	bool getFourWayModeActive() const { return options.fourWayMode ^ map48WayModeToggle; }
 
 	void setInputMode(InputMode inputMode) { options.inputMode = inputMode; }
 	void setSOCDMode(SOCDMode socdMode) { options.socdMode = socdMode; }

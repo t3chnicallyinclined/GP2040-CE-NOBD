@@ -121,10 +121,7 @@ private:
     uint8_t lastDpad;           // Last d-pad pressed (for Turbo Change)
     uint16_t turboButtonsMask;  // Turbo Buttons Enabled
     uint16_t alwaysEnabled;     // Turbo SHMUP Always Enabled
-    uint32_t uIntervalUS;       // Turbo Interval in microseconds
     uint32_t chargeState;       // Turbo Charge Button States
-    bool bTurboFlicker;         // Turbo Enable Buttons Toggle OFF Flag ??
-    uint64_t nextTimer;         // Turbo Timer
     uint8_t adcShmupDial;       // Turbo ADC Dial Input
     uint64_t nextAdcRead;       // ADC read timer
     bool hasShmupDial;          // Flag for shmup dial presence
