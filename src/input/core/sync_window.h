@@ -25,7 +25,9 @@
  *
  * TigerStyle: static state, bounded (the window has a fixed deadline -- no unbounded
  * wait), asserts on entry + the negative space, named limits. `now` is a monotonic
- * u32 tick counter; re-epoch before it wraps at 2^32 ticks.
+ * u32 tick counter; every compare against it is wrap-safe (sync_tick_reached), so it may
+ * free-run through 2^32 -- the only contract is that no deadline is ever more than
+ * 2^31 ticks ahead, which SYNC_WINDOW_MAX guarantees by five orders of magnitude.
  */
 #define SYNC_WINDOW_DEFAULT 5u      /* ticks (V1 default ~5 ms; map ms->ticks at call site) */
 #define SYNC_WINDOW_MAX     500u    /* named limit (V1 nobdSyncDelay is 1..500)             */
@@ -54,6 +56,18 @@ typedef struct {
     bool      release_open;         /* a release window is counting down */
     uint32_t  release_deadline;
 } sync_window_t;
+
+/* WRAP-SAFE tick compare. `now` is a free-running u32 tick counter (ms on V1, which wraps at
+ * 49.7 days of uptime). Every deadline the window keeps is within SYNC_WINDOW_MAX ticks of now,
+ * so "has `deadline` been reached?" is the SIGN of the difference, never an absolute `>=`: an
+ * absolute compare reads a wrapped `now` (small) as "before" a pre-wrap deadline (huge) and
+ * either commits a zero-width window or holds a release forever. Same class NOBD-ZERO V2 hit
+ * at 12.4 days on its 4 kHz tick. The Python reference is on unbounded ints and cannot wrap;
+ * for every non-wrapping timeline the two compares are identical, so the DST stays differential. */
+static inline bool sync_tick_reached(uint32_t now, uint32_t deadline)
+{
+    return (int32_t)(now - deadline) >= 0;
+}
 
 void      sync_window_init(sync_window_t *s, uint32_t window, bool release_debounce);
 
@@ -106,5 +120,15 @@ buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw);
 /* Ticks from `now` until the open window commits, or 0 if no window is open (nothing pending ->
  * sleep until an input edge). This is the timer-one-pulse deadline in software form. */
 uint32_t  sync_window_next_commit(const sync_window_t *s, uint32_t now);
+
+/* Ticks from `now` until the nearest TIME-DRIVEN event the window still owes -- the press
+ * commit (open), the release-debounce commit (release_open) or a preserve-width release
+ * (rel_due of any releasing bit) -- or 0 if nothing is pending. THIS is the deadline an
+ * event-driven caller must arm its one-pulse timer for: a caller that only arms the press
+ * commit leaves a delayed release with nothing to land on, and it then lands on the NEXT
+ * edge of any pin (a same-button re-press cancels it outright and the tap is swallowed).
+ * Grace expiry is not a wake: it only matters once another press arrives, which is an edge.
+ * Called right after step(), so every pending deadline is strictly ahead (result >= 1). */
+uint32_t  sync_window_next_event(const sync_window_t *s, uint32_t now);
 
 #endif /* NOBD_CORE_SYNC_WINDOW_H */

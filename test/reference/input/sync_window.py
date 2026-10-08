@@ -157,3 +157,21 @@ class SyncWindow:
         assert self._pending_release == set() or self._release_open, "pending release without a window"
         assert not (self.grace_open and now >= self.grace_until), "grace outlived its deadline"
         return frozenset(self.committed | passthru)
+
+    def next_event(self, now):
+        """Ticks until the nearest TIME-DRIVEN event still owed (press commit, release-debounce
+        commit, or a preserve-width release), or 0 if nothing is pending. Mirrors the C
+        sync_window_next_event(): this is the deadline an event-driven caller must arm its
+        one-pulse timer for. Grace expiry is not a wake (it only matters on the next press)."""
+        cands = []
+        if self._open:
+            cands.append(self._deadline - now)
+        if self._release_open:
+            cands.append(self._release_deadline - now)
+        for b in self._releasing:
+            cands.append(self._rel_due[b] - now)
+        if not cands:
+            return 0
+        best = min(cands)
+        assert best >= 1, "an owed deadline is never already reached after step()"
+        return best

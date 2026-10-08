@@ -52,6 +52,16 @@ buttons_t socd_clean(socd_t *s, buttons_t pressed);
 typedef struct {
     uint32_t  window;
     bool      release_debounce;
+    buttons_t synced_mask;
+    buttons_t attack_mask;
+    uint32_t  commit_at;
+    bool      grace_open;
+    uint32_t  grace_until;
+    bool      preserve_width;
+    buttons_t releasing;
+    uint32_t  delay[32];
+    uint32_t  rel_due[32];
+    uint32_t  press_at[32];
     buttons_t committed;
     buttons_t pending;
     bool      open;
@@ -63,7 +73,12 @@ typedef struct {
     uint32_t  release_deadline;
 } sync_window_t;
 void      sync_window_init(sync_window_t *s, uint32_t window, bool release_debounce);
+void      sync_window_set_masks(sync_window_t *s, buttons_t synced_mask, buttons_t attack_mask);
+void      sync_window_set_commit_at(sync_window_t *s, uint32_t commit_at);
+void      sync_window_set_preserve_width(sync_window_t *s, bool on);
 buttons_t sync_window_step(sync_window_t *s, uint32_t now, buttons_t raw);
+uint32_t  sync_window_next_commit(const sync_window_t *s, uint32_t now);
+uint32_t  sync_window_next_event(const sync_window_t *s, uint32_t now);
 
 typedef struct {
     buttons_t buttons;
