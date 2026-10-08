@@ -62,6 +62,12 @@ static XInputAuthData * xinputAuthData = nullptr;
 namespace {
     volatile bool s_fastReady = false;   // snapshot done + registered (set last, single writer)
     uint8_t  s_fastEpIn = 0;
+    // The IN endpoint's DPRAM buffer, refreshed by the loop every pass (process() runs even in the
+    // idle-skip), so the edge ISR stamps through a cached pointer instead of calling the flash-
+    // resident dcd_rp2040_ep_dpram() through a veneer on every edge (~25-40 cycles warm, 100+ on
+    // an XIP miss). Re-read each pass rather than once, so a bus reset that re-allocates DPRAM can
+    // never leave the ISR writing into another endpoint's buffer. Pointer store is atomic on M0+.
+    uint8_t* volatile s_fastDpram = nullptr;
     uint32_t s_fastAllBtn = 0;           // union of every mapped pin (mask the raw read to these)
     // pin masks per XInput bit, snapshotted from the gamepad mapping at first process()
     uint32_t s_pmUp, s_pmDown, s_pmLeft, s_pmRight, s_pmStart, s_pmBack, s_pmLS, s_pmRS;
@@ -153,7 +159,7 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
 
 static void __not_in_flash_func(xinput_fastpath)(uint32_t committed) {
     if (!s_fastReady) return;
-    uint8_t* dpram = dcd_rp2040_ep_dpram(s_fastEpIn);
+    uint8_t* dpram = s_fastDpram;   // cached by the loop; see its declaration
     if (dpram == nullptr) return;
 
     // The doorbell already read the pins, applied active-low, and ran the sync window: `committed`
@@ -162,10 +168,12 @@ static void __not_in_flash_func(xinput_fastpath)(uint32_t committed) {
     uint8_t b1, b2, lt, rt;
     int16_t lx, ly, rx, ry;
     xinput_straight(committed, b1, b2, lt, rt, lx, ly, rx, ry);
-    dpram[2] = b1;   // XInputReport.buttons1
-    dpram[3] = b2;   // XInputReport.buttons2
-    dpram[4] = lt;   // XInputReport.lt
-    dpram[5] = rt;   // XInputReport.rt
+    // Two halfword stores, not four byte stores: the SIE reads this buffer during the IN
+    // transaction (~13 us of every ms), so byte-at-a-time a chord could ship with buttons1 new
+    // and buttons2 old -- the exact split the sync window exists to prevent. A 16-bit store on a
+    // 2-aligned address is one AHB beat the SIE can never see half-written. Little-endian.
+    *(volatile uint16_t*)(dpram + 2) = (uint16_t)(b1 | ((uint16_t)b2 << 8));   // buttons1 | buttons2
+    *(volatile uint16_t*)(dpram + 4) = (uint16_t)(lt | ((uint16_t)rt << 8));   // lt | rt
     if (s_dpadMode) {   // analog-dpad: the dpad drives a stick -- write the 4 sticks (int16 LE, 2-aligned)
         *(volatile int16_t*)(dpram + 6)  = lx;   // XInputReport.lx
         *(volatile int16_t*)(dpram + 8)  = ly;   // XInputReport.ly
@@ -532,6 +540,7 @@ bool XInputDriver::process(Gamepad * gamepad) {
     // Re-checked every loop, so a mode switch (hotkey/toggle) flips it safely. This gate IS the
     // harness we widen, one DST-proven stage at a time, toward "all inputs on the 1us path".
     if (s_fastReady) {
+        s_fastDpram = dcd_rp2040_ep_dpram(s_fastEpIn);   // refresh the ISR's DPRAM pointer (flash call, loop side)
         const GamepadOptions& opt = Storage::getInstance().getGamepadOptions();
         Gamepad* gp = Storage::getInstance().GetGamepad();
         s_invX = opt.invertXAxis;   // publish transform config to the ISR BEFORE we compare or it runs
