@@ -72,7 +72,7 @@ void sync_window_set_commit_at(sync_window_t *s, uint32_t commit_at)
 buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t raw)
 {
     assert(s != NULL);
-    assert(!s->started || now >= s->last_now);   /* monotonic: repeats OK (V1 polls faster than a tick), never backward */
+    assert(!s->started || sync_tick_reached(now, s->last_now));   /* monotonic (wrap-safe): repeats OK, never backward */
 
     /* Bits outside synced_mask are never held back -- they bypass the window entirely and are
      * OR'd back on at the end. 0 means "all bits are synced", so a zeroed struct is unchanged. */
@@ -106,7 +106,7 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
             s->pending_release |= just_released;
         }
         s->pending_release &= ~raw;                   /* a re-press cancels the pending release */
-        if (s->pending_release && now >= s->release_deadline) {
+        if (s->pending_release && sync_tick_reached(now, s->release_deadline)) {
             s->committed &= ~s->pending_release;
             s->pending_release = 0;
             s->release_open = false;
@@ -124,7 +124,7 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
     s->pending &= raw;
 
     /* The grace period from an eager commit runs to the ORIGINAL deadline, then expires. */
-    if (s->grace_open && now >= s->grace_until)
+    if (s->grace_open && sync_tick_reached(now, s->grace_until))
         s->grace_open = false;
 
     /* a new press (not committed, not already pending) opens or joins a window */
@@ -157,7 +157,7 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
     if (s->open && s->commit_at != 0u) {
         const buttons_t am = s->attack_mask ? s->attack_mask : (buttons_t)~(buttons_t)0;
         if ((uint32_t)__builtin_popcount((unsigned)(s->pending & am)) >= s->commit_at) {
-            if (now < s->deadline) {          /* early: hold the door open for late joiners */
+            if (!sync_tick_reached(now, s->deadline)) {   /* early: hold the door open for late joiners */
                 s->grace_open  = true;
                 s->grace_until = s->deadline;
             }
@@ -169,7 +169,7 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
     }
 
     /* commit everything the window collected, at its deadline */
-    if (s->open && now >= s->deadline) {
+    if (s->open && sync_tick_reached(now, s->deadline)) {
         sw_record_delay(s, s->pending, now);
         s->committed |= s->pending;
         s->pending = 0;
@@ -181,7 +181,7 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
         buttons_t r = s->releasing;
         while (r) {
             const unsigned b = (unsigned)__builtin_ctz((unsigned)r);
-            if (now >= s->rel_due[b]) {
+            if (sync_tick_reached(now, s->rel_due[b])) {
                 s->committed &= ~((buttons_t)1u << b);
                 s->releasing &= ~((buttons_t)1u << b);
             }
@@ -193,11 +193,11 @@ buttons_t CORE_HOT(sync_window_step)(sync_window_t *s, uint32_t now, buttons_t r
     s->last_now = now;
     /* negative space: a window is never left open past its deadline, and there is
      * never pending state without an open window. */
-    assert(!(s->open && now >= s->deadline));
+    assert(!(s->open && sync_tick_reached(now, s->deadline)));
     assert(s->pending == 0 || s->open);
-    assert(!(s->release_open && now >= s->release_deadline)); /* release window never past its deadline */
+    assert(!(s->release_open && sync_tick_reached(now, s->release_deadline))); /* release window never past its deadline */
     assert(s->pending_release == 0 || s->release_open);       /* no pending release without an open window */
-    assert(!(s->grace_open && now >= s->grace_until));        /* grace never outlives its deadline */
+    assert(!(s->grace_open && sync_tick_reached(now, s->grace_until)));        /* grace never outlives its deadline */
     return s->committed | passthru;
 }
 
@@ -206,6 +206,34 @@ uint32_t sync_window_next_commit(const sync_window_t *s, uint32_t now)
     assert(s != NULL);
     if (!s->open)
         return 0u;                            /* no window open -> nothing pending */
-    assert(s->deadline > now);                /* step commits+closes once now >= deadline */
-    return s->deadline - now;                 /* >= 1: the commit is strictly ahead */
+    assert(!sync_tick_reached(now, s->deadline));   /* step commits+closes once the deadline is reached */
+    return s->deadline - now;                       /* >= 1: the commit is strictly ahead (wrap-safe) */
+}
+
+uint32_t sync_window_next_event(const sync_window_t *s, uint32_t now)
+{
+    assert(s != NULL);
+    uint32_t best = 0u;                       /* 0 = nothing pending */
+    if (s->open) {
+        assert(!sync_tick_reached(now, s->deadline));
+        best = s->deadline - now;
+    }
+    if (s->release_open) {
+        assert(!sync_tick_reached(now, s->release_deadline));
+        const uint32_t d = s->release_deadline - now;
+        if (!best || d < best) best = d;
+    }
+    buttons_t r = s->releasing;               /* preserve_width: each bit owes its own delay */
+    while (r) {
+        const unsigned b = (unsigned)__builtin_ctz((unsigned)r);
+        assert(!sync_tick_reached(now, s->rel_due[b]));   /* step() already released anything due */
+        const uint32_t d = s->rel_due[b] - now;
+        if (!best || d < best) best = d;
+        r &= r - 1u;
+    }
+    /* Belt and braces for the Release build (asserts out): a deadline that is somehow already
+     * reached must wake IMMEDIATELY, never read as "nothing pending" -- that is the stuck-button
+     * failure mode this function exists to close. */
+    if ((s->open || s->release_open || s->releasing) && best == 0u) best = 1u;
+    return best;
 }

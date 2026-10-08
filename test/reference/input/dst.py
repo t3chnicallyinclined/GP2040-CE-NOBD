@@ -305,19 +305,34 @@ def sync_window_parity(seed, ffi, lib):
     rng = random.Random(seed)
     window = rng.randint(1, MAX_WINDOW_FUZZ)
     release_debounce = rng.random() < 0.5
+    # The nobd-25 policy knobs: preserve_width (exclusive with release_debounce) and eager
+    # commit. Fuzzed here so the per-bit release debt and the grace period are under the oracle.
+    preserve_width = (not release_debounce) and rng.random() < 0.5
+    commit_at = rng.choice((0, 0, 2, 3))
     raw, _ = _timeline(rng, window)
-    py = SyncWindow(window, release_debounce)
+    py = SyncWindow(window, release_debounce, commit_at=commit_at, preserve_width=preserve_width)
     cs = ffi.new("sync_window_t *")
     lib.sync_window_init(cs, window, release_debounce)
+    lib.sync_window_set_commit_at(cs, commit_at)
+    lib.sync_window_set_preserve_width(cs, preserve_width)
+    cfg = {"seed": seed, "window": window, "rd": release_debounce,
+           "pw": preserve_width, "commit_at": commit_at}
     for now in range(NTICKS):
         py_out = set(py.step(now, raw[now]))
         c_out = bunmask(lib.sync_window_step(cs, now, bmask(raw[now])))
         if py_out != c_out:
-            return False, {"seed": seed, "window": window, "rd": release_debounce,
-                           "now": now, "in": sorted(raw[now]),
+            return False, {**cfg, "now": now, "in": sorted(raw[now]),
                            "py": sorted(py_out), "c": sorted(c_out),
                            "error": "Python<->C sync_window divergence"}
-    return True, {"seed": seed, "window": window, "rd": release_debounce, "error": None}
+        # The owed-deadline query is what the firmware arms its one-pulse alarm from: it must
+        # agree tick-for-tick too, or a release lands on the wrong wake (or none at all).
+        py_next = py.next_event(now)
+        c_next = lib.sync_window_next_event(cs, now)
+        if py_next != c_next:
+            return False, {**cfg, "now": now, "in": sorted(raw[now]),
+                           "py_next": py_next, "c_next": c_next,
+                           "error": "Python<->C sync_window next_event divergence"}
+    return True, {**cfg, "error": None}
 
 
 def turbo_parity(seed, ffi, lib):
