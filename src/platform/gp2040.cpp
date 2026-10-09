@@ -14,6 +14,9 @@
 #include "input/core_bridge.h"
 #include "input/gpio_doorbell.h"
 #include "input/latency_probe.h"   // LatencyProbe::epoch -- reset the HUD on a config swap (no-op in prod)
+#if TE_SELFTEST
+#include "input/selftest.h"      // self-driving input stimulus (test images only)
+#endif
 #include "hardware/sync.h"   // __wfi -- A4b event-driven wake
 
 // Inputs for Core0
@@ -404,6 +407,11 @@ void GP2040::run() {
 		if (configMode) {
 			rndis_init();
 		}
+#if TE_SELFTEST
+		else {
+			SelfTest::start();   // drives B1/B2/UP on the schedule in selftest.cpp, 3 s from now
+		}
+#endif
 	}
 
 	// Arm the hardware watchdog now that init is done. pause_on_debug=true so
