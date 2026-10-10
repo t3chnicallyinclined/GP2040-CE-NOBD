@@ -14,9 +14,13 @@
  * down. See the table in selftest.cpp.
  */
 #pragma once
+#include <stdint.h>
 
 namespace SelfTest {
     // Arm the stimulus: it starts SELFTEST_START_DELAY_MS after this call (gives USB time to
     // enumerate) and repeats forever. Pins are taken from the live gamepad mapping (B1, B2, UP).
     void start();
+
+    // Diagnostics: how many schedule steps have fired (0 = the stimulus never started).
+    uint32_t stepCount();
 }

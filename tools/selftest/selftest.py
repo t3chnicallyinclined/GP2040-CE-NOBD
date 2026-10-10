@@ -47,7 +47,7 @@ TAP40 = [(0, 40), (200, 240), (300, 340)]   # (press, release) offsets of the 40
 XI_A, XI_B, XI_UP = 0x1000, 0x2000, 0x0001
 
 
-def expected_transitions(sync_on):
+def expected_transitions(sync_on, window_ms=5):
     """What the host must see, as a list of (offset_ms, mask, optional).
 
     Sync on: the chord is ONE transition straight to A|B (eager commit at the second press),
@@ -58,7 +58,11 @@ def expected_transitions(sync_on):
     ev = []
     for off, mask in SCHEDULE:
         if sync_on and off in (900, 903):
-            continue
+            if window_ms > 3:
+                continue                       # pruned by design: released before its commit
+            if window_ms == 3:
+                ev.append((off, mask, True))   # commit and release race at exactly +3 ms: either
+                continue
         if sync_on and off == 500:
             continue
         if sync_on and off == 560:
@@ -102,17 +106,55 @@ def capture_xinput(seconds):
         sys.exit("no XInput controller connected")
     print(f"capturing XInput user {idx} for {seconds} s (the stimulus starts 3 s after boot) ...")
     events = []                                  # (t_ms, mask)
-    last_mask = None
+    raw = []                                     # every packet change: (t_ms, wButtons, lx, ly, lt, rt)
+    last_mask, last_pkt = None, None
+    try:   # a scheduling stall on the host looks exactly like a late release; minimise them
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x80)  # HIGH
+    except Exception:
+        pass
     t0 = time.perf_counter()
-    while time.perf_counter() - t0 < seconds:
+    t_prev = t0
+    global STALLS
+    STALLS = []                                  # (t_ms, gap_ms): the poll loop did not run for gap_ms
+    while True:
+        t_now = time.perf_counter()
+        if t_now - t0 >= seconds:
+            break
+        gap = (t_now - t_prev) * 1000.0
+        if gap > 4.0:
+            STALLS.append(((t_now - t0) * 1000.0, gap))
+        t_prev = t_now
         if xi.XInputGetState(idx, ctypes.byref(st)) != 0:
             sys.exit("controller disconnected mid-capture")
-        wb = st.Gamepad.wButtons
+        g = st.Gamepad
+        if st.dwPacketNumber != last_pkt:
+            raw.append(((time.perf_counter() - t0) * 1000.0, g.wButtons, g.sThumbRX & 0xFFFF,
+                        g.sThumbRY & 0xFFFF, g.bLeftTrigger, g.bRightTrigger))
+            last_pkt = st.dwPacketNumber
+        wb = g.wButtons
         mask = (A if wb & XI_A else 0) | (B if wb & XI_B else 0) | (U if wb & XI_UP else 0)
         if mask != last_mask:
             events.append(((time.perf_counter() - t0) * 1000.0, mask))
             last_mask = mask
+    global RAW
+    RAW = raw
     return events, None
+
+
+RAW = []
+STALLS = []
+
+
+def dump_raw(limit=60):
+    if not RAW:
+        print("  (no XInput packet changes at all: the host saw a completely static controller)")
+        return
+    print(f"  {len(RAW)} XInput packet changes; first {min(limit, len(RAW))}  "
+          f"(t ms, wButtons, RX=edge IRQs, RY=stimulus steps, LT, RT):")
+    for t, wb, rx, ry, lt, rt in RAW[:limit]:
+        print(f"    {t:9.1f}  0x{wb:04X}  irq={rx:5d} step={ry:5d}  {lt:3d} {rt:3d}")
+    first, last = RAW[0], RAW[-1]
+    print(f"  over the capture: edge IRQs {first[2]} -> {last[2]}, stimulus steps {first[3]} -> {last[3]}")
 
 
 # ---- capture: USBPcap text export --------------------------------------------------------------
@@ -143,17 +185,21 @@ def capture_pcap(path):
 # ---- analysis ---------------------------------------------------------------------------------
 def analyse(events, stamps, sync_on, window_ms, verbose):
     if not events:
-        print("no transitions captured at all"); return 2
+        print("no transitions captured at all"); dump_raw(); return 2
     t_base = events[0][0]
     events = [(t - t_base, m) for t, m in events]
-    exp = expected_transitions(sync_on)
+    exp = expected_transitions(sync_on, window_ms)
     # anchors: 0 -> U transitions (nothing else ever presses UP)
     anchors = [i for i in range(1, len(events)) if events[i][1] == U and events[i - 1][1] == 0]
     if len(anchors) < 2:
         print(f"only {len(anchors)} UP anchor(s) seen in {len(events)} transitions; capture longer "
               f"(stimulus is a 1 s cycle, starts 3 s after boot)")
+        print("  transitions seen (t ms, mask A=1 B=2 UP=4):")
+        for t, m in events[:40]:
+            print(f"    {t:9.1f}  {m}")
+        dump_raw()
         return 2
-    cycles, failures, widths, deltas, stuck = 0, [], [], [], 0
+    cycles, failures, widths, deltas, stuck, unreliable = 0, [], [], [], 0, 0
     held_max = 0.0
     for ai in anchors[1:-1]:                     # skip the partial first/last cycles
         start = events[ai][0] - ANCHOR_OFFSET
@@ -175,10 +221,17 @@ def analyse(events, stamps, sync_on, window_ms, verbose):
                 ip = next(i for i, (eo, _, _) in enumerate(exp) if eo == p)
                 ir = next(i for i, (eo, _, _) in enumerate(exp) if eo == r)
                 widths.append(obs[pos[ir]][0] - obs[pos[ip]][0])
-        # stuck detector: nothing in the schedule is held longer than 60 ms (+window +poll)
+        # stuck detector: nothing in the schedule is held longer than 60 ms (+window +poll).
+        # A hold whose end was observed right after a host stall is the HOST's fault: the
+        # release could not be seen while the poll loop was not running.
         for i in range(len(obs) - 1):
             if obs[i][1] != 0:
                 held = obs[i + 1][0] - obs[i][0]
+                t_end_abs = obs[i + 1][0] + start + t_base
+                stalled = [g for ts, g in STALLS if 0 <= t_end_abs - ts <= 3.0]
+                if stalled:
+                    unreliable += 1
+                    continue
                 held_max = max(held_max, held)
                 if held > 60 + window_ms + 5:
                     ok = False; stuck += 1
@@ -196,6 +249,10 @@ def analyse(events, stamps, sync_on, window_ms, verbose):
         print(f"  transition offset vs schedule:    min {min(deltas):+.1f}  avg {sum(deltas)/len(deltas):+.1f}  "
               f"max {max(deltas):+.1f} ms   (expect ~ +window for A, ~0 for UP, +-1 ms poll)")
     print(f"  longest hold observed: {held_max:.1f} ms (schedule max 60)")
+    if STALLS:
+        worst = max(g for _, g in STALLS)
+        print(f"  host poll-loop stalls > 4 ms: {len(STALLS)} (worst {worst:.1f} ms); "
+              f"{unreliable} hold(s) ending in a stall were NOT counted against the device")
     if stamps:
         dev = sorted(stamps.values())
         print(f"  device edge stamps present: {len(dev)} (measure image) -- widths from the device clock:")
@@ -214,7 +271,11 @@ def analyse(events, stamps, sync_on, window_ms, verbose):
         print(f"\nFAIL: {len(failures)} problem(s) in {cycles} cycles ({stuck} stuck holds)")
         for c, msg in failures[:20]:
             print(f"  cycle {c}: {msg}")
+        if verbose:
+            dump_raw(20)
         return 1
+    if verbose:
+        dump_raw(40)
     print("\nPASS: every press and release registered, in order, nothing stuck")
     return 0
 

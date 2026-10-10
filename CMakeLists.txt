@@ -193,6 +193,14 @@ option(TE_SELFTEST "Compile in the self-driving input stimulus (test images only
 if(TE_SELFTEST)
   add_compile_definitions(TE_SELFTEST=1)
 endif()
+# Self-test DIAGNOSTIC variant: the loop polls every tick (no idle-skip) and the right stick
+# carries the edge-IRQ and stimulus-step counters, so a dead stage can be located from the host.
+# The report then comes from the LOOP, not the ISR fast path -- use plain TE_SELFTEST to test
+# the shipping path.
+option(TE_SELFTEST_DIAG "Self-test with stage counters on the right stick (loop-owned report)" OFF)
+if(TE_SELFTEST_DIAG)
+  add_compile_definitions(TE_SELFTEST_DIAG=1)
+endif()
 
 add_executable(${PROJECT_NAME}
 # --- vendored DST-proven input core (source of truth: nobd-zero-v2/firmware/core) ---

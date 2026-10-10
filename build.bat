@@ -8,6 +8,8 @@ REM
 REM    build.bat            production image (latency instrumentation compiled out)
 REM    build.bat selftest   self-test image: measure + the firmware drives its own button
 REM                         pins on a fixed schedule; check with tools/selftest/selftest.py
+REM    build.bat selftest diag   same, plus stage counters on the right stick and no idle-skip
+REM                         (report comes from the loop, not the ISR): locates a dead stage
 REM    build.bat measure    measurement image (TE_LATENCY_MEASURE=ON: on-die probe
 REM                         + report edge-time stamp + OLED D/W HUD). See docs/latency-testing/.
 REM
@@ -25,6 +27,8 @@ set SELFTEST=OFF
 if /I "%~1"=="measure" set MEASURE=ON
 if /I "%~1"=="selftest" set MEASURE=ON
 if /I "%~1"=="selftest" set SELFTEST=ON
+set DIAG=OFF
+if /I "%~2"=="diag" set DIAG=ON
 
 set PICO_SDK_PATH=C:\Users\trist\projects\GP2040-CE\build\_deps\pico_sdk-src
 set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
@@ -32,7 +36,7 @@ set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DGP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard -DPICO_BOARD=pico ^
   -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on ^
-  -DTE_LATENCY_MEASURE=%MEASURE% -DTE_SELFTEST=%SELFTEST%
+  -DTE_LATENCY_MEASURE=%MEASURE% -DTE_SELFTEST=%SELFTEST% -DTE_SELFTEST_DIAG=%DIAG%
 if errorlevel 1 exit /b 1
 cmake --build build --parallel
 if errorlevel 1 exit /b 1

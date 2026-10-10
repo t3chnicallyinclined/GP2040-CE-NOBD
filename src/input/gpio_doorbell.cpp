@@ -89,15 +89,19 @@ inline void __not_in_flash_func(armNearest)() {
     if (!any) { s_alarmArmed = false; return; }          // nothing owed; a stale alarm firing is a harmless re-step
     if (s_alarmArmed && best == s_alarmUs) return;        // already armed for exactly this instant
     s_alarmUs = best;
-    if (hardware_alarm_set_target((uint)s_alarm, from_us_since_boot(best))) {
-        // Target already in the past (only possible if we were held off for a whole ms). The
-        // alarm will never fire for it, so force the IRQ: the callback re-steps and commits now,
-        // instead of trusting an alarm that is never coming -- the stuck-input failure mode.
-        s_alarmArmed = false;
-        hardware_alarm_force_irq((uint)s_alarm);
-    } else {
-        s_alarmArmed = true;
+    // A target already in the past (only possible if we were held off for a whole ms) is one
+    // the SDK will NEVER fire -- set_target returns true and leaves no callback pending, so a
+    // forced IRQ would be swallowed too. Re-aim a hair ahead of now until it takes: the callback
+    // then re-steps and commits immediately, instead of trusting an alarm that is never coming
+    // (the stuck-input failure mode). Bounded: each retry is 50 us ahead of a fresh clock read.
+    for (int tries = 0; tries < 8; tries++) {
+        if (!hardware_alarm_set_target((uint)s_alarm, from_us_since_boot(best))) {
+            s_alarmArmed = true;
+            return;
+        }
+        best = time_us_64() + 50u;
     }
+    s_alarmArmed = false;   // pathological: leave it to the loop poll / next edge
 }
 
 // Step the input front stage with the current pins, update s_committed, and arm the one-pulse
