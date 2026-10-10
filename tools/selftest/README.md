@@ -45,6 +45,16 @@ python tools\selftest\selftest.py --pcap cap.txt
 That also reads the device-side edge stamps the measure build puts in the report, so the
 stimulus width is printed from the RP2040's own clock.
 
+## Locating a dead stage
+
+`build.bat selftest diag` builds the same stimulus with the main loop polling every tick
+(no idle-skip) and two counters on the right stick that the XInput API exposes: RX is the
+doorbell edge-IRQ count, RY is the stimulus step count. The script prints both over the
+capture. Steps not climbing means the stimulus never started; steps climbing with IRQs flat
+means the edge interrupt is not seeing the pins; both climbing with no button transitions
+means the report path dropped them. In this variant the report is loop-owned, so use the
+plain `selftest` image for the shipping-path verdict.
+
 ## What it cannot see
 
 The switch itself. Bounce, a worn contact or a bad crimp show up in play and not here, by
