@@ -8,6 +8,9 @@
 #include "storagemanager.h"
 #include "input/latency_probe.h"
 #include "input/gpio_doorbell.h"
+#if TE_SELFTEST
+#include "input/selftest.h"
+#endif
 #include "pico.h"              // __not_in_flash_func (RAM-pin the ISR fast path)
 #include "hardware/gpio.h"    // gpio_get_all (read the pins straight, in the edge ISR)
 #include <cstddef>            // offsetof (split report content from the measurement-stamp region)
@@ -479,6 +482,14 @@ bool XInputDriver::process(Gamepad * gamepad) {
     xinputReport.ly = static_cast<int16_t>(~gamepad->state.ly) + INT16_MIN;
     xinputReport.rx = static_cast<int16_t>(gamepad->state.rx) + INT16_MIN;
     xinputReport.ry = static_cast<int16_t>(~gamepad->state.ry) + INT16_MIN;
+#if TE_SELFTEST_DIAG
+    // DIAGNOSTIC IMAGE ONLY: the right stick carries two counters the host can read through the
+    // plain XInput API -- RX = doorbell edge-IRQ count, RY = self-test steps fired. This also
+    // makes the safety gate's stick compare fail, so the fast path disarms and the LOOP owns
+    // the report: exactly what we want when the question is "are the pins even moving".
+    xinputReport.rx = (int16_t)(uint16_t)GpioDoorbell::edgeCount();
+    xinputReport.ry = (int16_t)(uint16_t)SelfTest::stepCount();
+#endif
 
     if (gamepad->hasAnalogTriggers)
     {

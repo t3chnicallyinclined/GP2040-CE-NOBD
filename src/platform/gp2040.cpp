@@ -434,7 +434,11 @@ void GP2040::run() {
 	const auto& _addonOpts = Storage::getInstance().getAddonOptions();
 	const bool idleSkipAllowed = !dcMode && !configMode
 	                          && !_addonOpts.keyboardHostOptions.enabled
-	                          && !_addonOpts.gamepadUSBHostOptions.enabled;
+	                          && !_addonOpts.gamepadUSBHostOptions.enabled
+#if TE_SELFTEST_DIAG
+	                          && false   // diagnostic image: always poll, so a dead edge IRQ cannot hide the pins
+#endif
+	                          ;
 	bool primed = false;
 
 	while (1) {

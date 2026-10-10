@@ -37,6 +37,7 @@ constexpr unsigned NSTEPS = sizeof(SCHEDULE) / sizeof(SCHEDULE[0]);
 
 uint32_t s_pins[3] = {0, 0, 0};          // GPIO masks for A, B, U
 unsigned s_step = 0;
+volatile uint32_t s_steps = 0;            // diagnostics: total steps fired
 alarm_id_t s_alarm = 0;
 
 inline uint32_t pinsOf(uint8_t bits) {
@@ -46,6 +47,7 @@ inline uint32_t pinsOf(uint8_t bits) {
 // Runs in the alarm-pool IRQ. Raw SIO register writes: no SDK call, no flash, microsecond-exact.
 int64_t __not_in_flash_func(stepCb)(alarm_id_t, void*) {
     const Step& st = SCHEDULE[s_step];
+    s_steps++;
     if (st.up)   sio_hw->gpio_oe_clr = pinsOf(st.up);     // release: back to input, pull-up wins
     if (st.down) sio_hw->gpio_oe_set = pinsOf(st.down);   // press: drive the (pre-cleared) LOW
     const unsigned next = (s_step + 1u) % NSTEPS;
@@ -74,5 +76,6 @@ namespace SelfTest {
 void start() {
     add_alarm_in_ms(SELFTEST_START_DELAY_MS, &armCb, nullptr, true);
 }
+uint32_t stepCount() { return s_steps; }
 }
 #endif // TE_SELFTEST
