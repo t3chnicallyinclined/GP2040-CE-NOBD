@@ -13,6 +13,7 @@ export default {
 		'nintendo-switch-pro': 'Nintendo Switch Pro',
 		ps3: 'PS3',
 		generic: 'Generic HID',
+		'nobd-hid': 'NOBD HID (deterministic)',
 		keyboard: 'Keyboard',
 		ps4: 'PS4',
 		ps5: 'PS5',
