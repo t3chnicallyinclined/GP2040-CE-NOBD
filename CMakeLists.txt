@@ -189,6 +189,12 @@ endif()
 # Programmatic input self-test: the firmware drives its OWN button pins on a fixed schedule
 # (no switch, no wiring, no finger) and tools/selftest/selftest.py checks every press/release
 # on the host. Test images only -- never ships. See src/input/selftest.h.
+option(NOBD_HID_MODE "Boot straight into NOBD HID regardless of saved config (test images)" OFF)
+if(NOBD_HID_MODE)
+  add_compile_definitions(NOBD_FORCE_HID_MODE=1)
+  message("NOBD_HID_MODE is ON -- this image always enumerates as NOBD HID")
+endif()
+
 option(TE_SELFTEST "Compile in the self-driving input stimulus (test images only)" OFF)
 if(TE_SELFTEST)
   add_compile_definitions(TE_SELFTEST=1)
@@ -224,6 +230,7 @@ src/input/gamepad.cpp
 src/input/GamepadState.cpp
 src/input/core_bridge.cpp
 src/input/gpio_doorbell.cpp
+src/reflect/nobd/NOBDHIDDriver.cpp
 src/input/latency_probe.cpp
 src/input/selftest.cpp
 src/platform/addonmanager.cpp

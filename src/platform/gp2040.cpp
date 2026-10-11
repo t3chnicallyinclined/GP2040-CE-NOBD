@@ -145,6 +145,13 @@ void GP2040::setup() {
 	addons.LoadAddon(new InputMacro());
 
 	InputMode inputMode = gamepad->getOptions().inputMode;
+#ifdef NOBD_FORCE_HID_MODE
+	// Test images only: come up in NOBD HID regardless of the saved config. Mode selection lives
+	// in webconfig, which SKIP_WEBBUILD does not rebuild, and INIT_UNSET_PROPERTY means a changed
+	// DEFAULT_INPUT_MODE cannot override a board that already has one saved -- so without this
+	// there is no way to reach the mode on a configured stick. Not in a production build.
+	inputMode = INPUT_MODE_NOBD_HID;
+#endif
 
 	const BootAction bootAction = getBootAction();
 	switch (bootAction) {
@@ -159,6 +166,9 @@ void GP2040::setup() {
 			break;
 		case BootAction::SET_INPUT_MODE_KEYBOARD:
 			inputMode = INPUT_MODE_KEYBOARD;
+			break;
+		case BootAction::SET_INPUT_MODE_NOBD_HID:
+			inputMode = INPUT_MODE_NOBD_HID;
 			break;
 		case BootAction::SET_INPUT_MODE_GENERIC:
 			inputMode = INPUT_MODE_GENERIC;
@@ -661,6 +671,8 @@ GP2040::BootAction GP2040::getBootAction() {
                                     return BootAction::SET_INPUT_MODE_SWITCH;
                                 case INPUT_MODE_KEYBOARD:
                                     return BootAction::SET_INPUT_MODE_KEYBOARD;
+                                case INPUT_MODE_NOBD_HID:
+                                    return BootAction::SET_INPUT_MODE_NOBD_HID;
                                 case INPUT_MODE_GENERIC:
                                     return BootAction::SET_INPUT_MODE_GENERIC;
                                 case INPUT_MODE_PS3:

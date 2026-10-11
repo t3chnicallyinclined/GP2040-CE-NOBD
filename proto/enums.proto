@@ -157,6 +157,10 @@ enum InputMode
     INPUT_MODE_GENERIC = 14;
     INPUT_MODE_SWITCH_PRO = 15;
     INPUT_MODE_DREAMCAST = 16;
+    // NOBD HID: a standard HID gamepad whose report is a direct bit image of the button
+    // bank, so the per-edge formatter is three shifts and three stores instead of ~150
+    // instructions. Determinism, not mean latency -- and the layout a DMA can patch.
+    INPUT_MODE_NOBD_HID = 17;
     INPUT_MODE_CONFIG = 255;
 }
 
