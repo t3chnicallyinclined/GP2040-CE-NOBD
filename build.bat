@@ -10,6 +10,8 @@ REM    build.bat selftest   self-test image: measure + the firmware drives its o
 REM                         pins on a fixed schedule; check with tools/selftest/selftest.py
 REM    build.bat selftest diag   same, plus stage counters on the right stick and no idle-skip
 REM                         (report comes from the loop, not the ISR): locates a dead stage
+REM    build.bat nobdhid    NOBD HID personality, forced on (measure image)
+REM    build.bat nobdhid selftest   same, plus the self-driving stimulus
 REM    build.bat measure    measurement image (TE_LATENCY_MEASURE=ON: on-die probe
 REM                         + report edge-time stamp + OLED D/W HUD). See docs/latency-testing/.
 REM
@@ -29,6 +31,13 @@ if /I "%~1"=="selftest" set MEASURE=ON
 if /I "%~1"=="selftest" set SELFTEST=ON
 set DIAG=OFF
 if /I "%~2"=="diag" set DIAG=ON
+REM NOBD HID: boot straight into the NOBD HID personality regardless of saved config. Mode
+REM selection lives in webconfig, which SKIP_WEBBUILD does not rebuild, so a test image needs
+REM this to be reachable at all on a stick that already has a mode saved.
+set NOBDHID=OFF
+if /I "%~1"=="nobdhid" set NOBDHID=ON
+if /I "%~1"=="nobdhid" set MEASURE=ON
+if /I "%~2"=="selftest" set SELFTEST=ON
 
 set PICO_SDK_PATH=C:\Users\trist\projects\GP2040-CE\build\_deps\pico_sdk-src
 set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
@@ -36,12 +45,13 @@ set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DGP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard -DPICO_BOARD=pico ^
   -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on ^
-  -DTE_LATENCY_MEASURE=%MEASURE% -DTE_SELFTEST=%SELFTEST% -DTE_SELFTEST_DIAG=%DIAG%
+  -DTE_LATENCY_MEASURE=%MEASURE% -DTE_SELFTEST=%SELFTEST% -DTE_SELFTEST_DIAG=%DIAG% ^
+  -DNOBD_HID_MODE=%NOBDHID%
 if errorlevel 1 exit /b 1
 cmake --build build --parallel
 if errorlevel 1 exit /b 1
 
 echo.
-echo === Done  (TE_LATENCY_MEASURE=%MEASURE% TE_SELFTEST=%SELFTEST%) ===
+echo === Done  (TE_LATENCY_MEASURE=%MEASURE% TE_SELFTEST=%SELFTEST% NOBD_HID_MODE=%NOBDHID%) ===
 for %%f in (build\GP2040-CE-NOBD_*_RP2040AdvancedBreakoutBoard.uf2) do echo   %%f
 endlocal

@@ -165,6 +165,7 @@ void ButtonLayoutScreen::generateHeader() {
         {
             case INPUT_MODE_PS3:    statusBar += "PS3"; break;
             case INPUT_MODE_GENERIC: statusBar += "USBHID"; break;
+            case INPUT_MODE_NOBD_HID: statusBar += "NOBDHID"; break;
             case INPUT_MODE_SWITCH: statusBar += "SWITCH"; break;
             case INPUT_MODE_MDMINI: statusBar += "GEN/MD"; break;
             case INPUT_MODE_NEOGEO: statusBar += "NGMINI"; break;

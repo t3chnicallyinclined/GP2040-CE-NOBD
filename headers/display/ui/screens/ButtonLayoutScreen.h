@@ -151,6 +151,7 @@ class ButtonLayoutScreen : public GPScreen {
             {INPUT_MODE_ASTRO, 9},
             {INPUT_MODE_XBOXORIGINAL, 10},
             {INPUT_MODE_GENERIC, 11},
+            {INPUT_MODE_NOBD_HID, 11},
             {INPUT_MODE_DREAMCAST, 12},
             {INPUT_MODE_SWITCH_PRO, 1},
         };
