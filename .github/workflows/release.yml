@@ -81,8 +81,8 @@ jobs:
             cmake_extra: "-DPICO_BOARD=pico_w"
           - board: WaveshareZero
             cmake_extra: ""
-          - board: W6100EVBPico2
-            cmake_extra: "-DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350"
+          # W6100EVBPico2 shelved for now (RP2350 + W6100 Ethernet P2). Re-add with
+          # cmake_extra: "-DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350"
           # Pico2 (RP2350) removed — untested on RP2350 hardware
 
     steps:
