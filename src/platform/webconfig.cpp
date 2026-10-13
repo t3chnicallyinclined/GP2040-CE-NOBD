@@ -702,6 +702,7 @@ std::string setGamepadOptions()
     readDoc(gamepadOptions.nobdSyncDirections, doc, "nobdSyncDirections");
     readDoc(gamepadOptions.nobdEagerCommit, doc, "nobdEagerCommit");
     readDoc(gamepadOptions.nobdPreserveWidth, doc, "nobdPreserveWidth");
+    readDoc(gamepadOptions.usbPollInterval, doc, "usbPollInterval");
     readDoc(gamepadOptions.dreamcastPinA, doc, "dreamcastPinA");
     readDoc(gamepadOptions.dreamcastPinB, doc, "dreamcastPinB");
     readDoc(gamepadOptions.dreamcastP2PinA, doc, "dreamcastP2PinA");
@@ -807,6 +808,7 @@ std::string getGamepadOptions()
     writeDoc(doc, "nobdSyncDirections", gamepadOptions.nobdSyncDirections ? 1 : 0);
     writeDoc(doc, "nobdEagerCommit", gamepadOptions.nobdEagerCommit);
     writeDoc(doc, "nobdPreserveWidth", gamepadOptions.nobdPreserveWidth ? 1 : 0);
+    writeDoc(doc, "usbPollInterval", gamepadOptions.usbPollInterval);
     writeDoc(doc, "dreamcastPinA", gamepadOptions.dreamcastPinA);
     writeDoc(doc, "dreamcastPinB", gamepadOptions.dreamcastPinB);
     writeDoc(doc, "dreamcastP2PinA", gamepadOptions.dreamcastP2PinA);

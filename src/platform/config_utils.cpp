@@ -149,6 +149,10 @@
  * 16 ms matches the nobd-desktop clamp and leaves headroom over any real finger gap.
  * The unit is milliseconds here: syncGpioGetAll multiplies by 1000 for its us clock.
  */
+#ifndef DEFAULT_USB_POLL_INTERVAL
+    #define DEFAULT_USB_POLL_INTERVAL 1
+#endif
+
 #ifndef NOBD_SYNC_DELAY_MAX
     #define NOBD_SYNC_DELAY_MAX 16
 #endif
@@ -444,6 +448,12 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     // frame late -- without that, this would split every 3-button input.
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdEagerCommit, 2);
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdPreserveWidth, true);
+    // USB polling interval (ms). Only 1/2/4/8 are offered; anything else falls back to 1 ms.
+    INIT_UNSET_PROPERTY(config.gamepadOptions, usbPollInterval, DEFAULT_USB_POLL_INTERVAL);
+    switch (config.gamepadOptions.usbPollInterval) {
+        case 1: case 2: case 4: case 8: break;
+        default: config.gamepadOptions.usbPollInterval = 1; break;
+    }
     // Two different release policies; release_debounce wins if someone set both.
     if (config.gamepadOptions.nobdReleaseDebounce) {
         config.gamepadOptions.nobdPreserveWidth = false;

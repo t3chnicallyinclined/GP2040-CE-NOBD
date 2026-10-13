@@ -201,6 +201,14 @@ const INPUT_MODE_GROUPS = [
 	{ labelKey: 'input-mode-group.mini', value: 1, group: 'mini' },
 ];
 
+// USB polling interval (bInterval, ms). 1 ms is the fastest full-speed USB allows.
+const USB_POLL_INTERVALS = [
+	{ labelKey: 'usb-poll-interval-options.1000hz', value: 1 },
+	{ labelKey: 'usb-poll-interval-options.500hz', value: 2 },
+	{ labelKey: 'usb-poll-interval-options.250hz', value: 4 },
+	{ labelKey: 'usb-poll-interval-options.125hz', value: 8 },
+];
+
 const DPAD_MODES = [
 	{ labelKey: 'd-pad-mode-options.d-pad', value: 0 },
 	{ labelKey: 'd-pad-mode-options.left-analog', value: 1 },
@@ -586,6 +594,10 @@ const schema = yup.object().shape({
 	nobdSyncDirections: yup.number().label('NOBD Sync Directions'),
 	nobdEagerCommit: yup.number().min(0).max(4).label('NOBD Eager Commit'),
 	nobdPreserveWidth: yup.number().label('NOBD Preserve Pulse Width'),
+	usbPollInterval: yup
+		.number()
+		.oneOf(USB_POLL_INTERVALS.map((o) => o.value))
+		.label('USB Polling Rate'),
 	// 255 (0xFF) is the "disabled/unconfigured" sentinel (matches firmware default
 	// and the P2 pins below). Capping at 29 wrongly rejected boards that aren't using
 	// Dreamcast, blocking the entire Input Settings save. See issue #8.
@@ -2011,6 +2023,39 @@ export default function SettingsPage() {
 															errors,
 															setFieldValue,
 															handleChange,
+														)}
+														{values.inputMode !== 16 && (
+															<Row className="mb-3">
+																<Col sm={4}>
+																	<Form.Label>
+																		{t('SettingsPage:usb-poll-interval-label')}
+																	</Form.Label>
+																	<Form.Select
+																		name="usbPollInterval"
+																		className="form-select-sm"
+																		value={values.usbPollInterval ?? 1}
+																		onChange={(e) =>
+																			setFieldValue(
+																				'usbPollInterval',
+																				parseInt(e.target.value),
+																			)
+																		}
+																		isInvalid={errors.usbPollInterval}
+																	>
+																		{USB_POLL_INTERVALS.map((o, i) => (
+																			<option
+																				key={`usbPollInterval-option-${i}`}
+																				value={o.value}
+																			>
+																				{t(`SettingsPage:${o.labelKey}`)}
+																			</option>
+																		))}
+																	</Form.Select>
+																	<Form.Text className="text-muted">
+																		{t('SettingsPage:usb-poll-interval-help')}
+																	</Form.Text>
+																</Col>
+															</Row>
 														)}
 														{inputModeSpecifics(
 															values,
