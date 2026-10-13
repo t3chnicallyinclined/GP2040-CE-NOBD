@@ -100,6 +100,10 @@ jobs:
       # upstream sync (v0.7.12-112); the Fortinbra pipeline action pinned an older SDK.
       - name: arm-none-eabi-gcc GNU Arm Embedded Toolchain
         uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          # Pinned: the action's default (latest) download currently fails its sha256 check.
+          # 14.2.Rel1 is also what local NOBD builds use.
+          release: '14.2.Rel1'
 
       - name: Checkout pico-sdk/2.3.1
         uses: actions/checkout@v6.0.2
