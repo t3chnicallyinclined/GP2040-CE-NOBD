@@ -16,7 +16,8 @@ static void __no_inline_not_in_flash_func(handleBusIrq)(MapleBus* bus) {
     bus->rxArrivalTimestamp = timer_hw->timerawl;
 
     // Brief spin for DMA to drain PIO RX FIFO (handles large packets like CMD12 = 36 words).
-    // At 125MHz, 100 iterations ~0.8µs. DMA drains 8 words in ~64ns. Very conservative.
+    // Exits on the first check when DMA has kept up (the normal case). The 100-iteration bound
+    // is a few microseconds of APB reads at 200 MHz and only matters if DMA has stalled.
     {
         uint32_t spins = 0;
         while (!pio_sm_is_rx_fifo_empty(bus->getRxPio(), bus->getRxSm()) && spins < 100) {

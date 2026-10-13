@@ -237,7 +237,7 @@ PLEDAnimationState getSwitchProAnimationNEOPICO(uint16_t ledState)
 ///////////////////////////////////
 
 bool NeoPicoLEDAddon::available() {
-    // NeoPixels use PIO0 SM0, which conflicts with Maple TX in Dreamcast mode
+    // NeoPixels run on PIO1 (see setup), the block Maple RX uses in Dreamcast mode
     if (DriverManager::getInstance().getInputMode() == INPUT_MODE_DREAMCAST)
         return false;
     const LEDOptions& ledOptions = Storage::getInstance().getLedOptions();

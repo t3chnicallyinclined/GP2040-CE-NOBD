@@ -15,8 +15,8 @@
 #include "hardware/gpio.h"    // gpio_get_all (read the pins straight, in the edge ISR)
 #include <cstddef>            // offsetof (split report content from the measurement-stamp region)
 
-// NOBD hot-buffer hook exposed from the vendored TinyUSB rp2040 driver (dcd_rp2040.c):
-// the DPRAM buffer the SIE sends from, so we can freshen the staged report in place.
+// NOBD hot-buffer hook (src/platform/usbdriver.cpp, RAM-resident): the DPRAM buffer the SIE
+// sends from for an endpoint, so we can freshen the staged report in place.
 extern "C" uint8_t* dcd_rp2040_ep_dpram(uint8_t ep_addr);
 
 // Set by the main loop (gp2040.cpp) each frame: did any addon modify the report? The ISR fast
@@ -59,25 +59,34 @@ static XInputAuthData * xinputAuthData = nullptr;
 // write the SAME buttons the ISR already wrote. No lock, no clobber.
 //
 // SCOPE: the ISR handles XInput gamepad mode with digital OR analog d-pad, plus sync, debounce,
-// axis-invert, 4-way, the stateless SOCD modes (neutral/up-priority) and dpad->stick -- all proven
-// equal to the loop by the safety gate below. Loop-only by design: stateful SOCD (last/first-win),
-// non-gamepad device types, addon-touched reports. buttons1/2 offsets are 2/3 in XInputReport.
+// axis-invert, the stateless SOCD modes (neutral/up-priority) and dpad->stick -- all proven
+// equal to the loop by the safety gate below. Loop-only by design: 4-way mode and stateful SOCD
+// (last/first-win) -- both keep press-order history -- non-gamepad device types, addon-touched
+// reports. buttons1/2 offsets are 2/3 in XInputReport.
 namespace {
     volatile bool s_fastReady = false;   // snapshot done + registered (set last, single writer)
     uint8_t  s_fastEpIn = 0;
     // The IN endpoint's DPRAM buffer, refreshed by the loop every pass (process() runs even in the
-    // idle-skip), so the edge ISR stamps through a cached pointer instead of calling the flash-
-    // resident dcd_rp2040_ep_dpram() through a veneer on every edge (~25-40 cycles warm, 100+ on
-    // an XIP miss). Re-read each pass rather than once, so a bus reset that re-allocates DPRAM can
-    // never leave the ISR writing into another endpoint's buffer. Pointer store is atomic on M0+.
+    // idle-skip), so the edge ISR stamps through a cached pointer instead of calling
+    // dcd_rp2040_ep_dpram() on every edge. Re-read each pass rather than once, so a bus reset that
+    // re-allocates DPRAM can never leave the ISR writing into another endpoint's buffer. Pointer
+    // store is atomic on M0+.
     uint8_t* volatile s_fastDpram = nullptr;
     uint32_t s_fastAllBtn = 0;           // union of every mapped pin (mask the raw read to these)
-    // pin masks per XInput bit, snapshotted from the gamepad mapping at first process()
+    // Pin masks per XInput bit, snapshotted from the gamepad mapping and RE-snapshotted whenever
+    // the mapping changes (profile switch, slider, web config). They feed the lookup table below.
     uint32_t s_pmUp, s_pmDown, s_pmLeft, s_pmRight, s_pmStart, s_pmBack, s_pmLS, s_pmRS;
     uint32_t s_pmLB, s_pmRB, s_pmHome, s_pmA, s_pmB, s_pmX, s_pmY, s_pmL2, s_pmR2;
-    // Stage 2 (combinational): axis invert + 4-way, published by the loop's gate before it compares
+    // The pin -> report map as a lookup: one 32-bit word per value of each pin byte, packed as
+    // buttons1 | buttons2<<8 | lt<<16 | rt<<24. The formatter ORs four loads instead of running
+    // 17 conditional tests. Rebuilt by the loop, with the fast path disarmed, when a mask changes.
+    uint32_t s_lut[4][256];
+    // Stage 2 (combinational): axis invert, published by the loop's gate before it compares
     // and before the ISR next runs. bool read/write is atomic on M0+, so no lock needed.
-    volatile bool s_invX = false, s_invY = false, s_fourWay = false;
+    volatile bool s_invX = false, s_invY = false;
+    // The driver's stick centre for the analog-dpad stage, published by the loop (it is a virtual
+    // call into flash, so the ISR must not make it).
+    volatile uint16_t s_joyMid = GAMEPAD_JOYSTICK_MID;
     // SOCD (Stage 2), stateless modes only: 0 = off/bypass, 1 = neutral, 2 = up-priority. Stateful
     // last/first-win need press-order history, so they stay gated to the loop.
     volatile uint8_t s_socd = 0;
@@ -93,15 +102,12 @@ namespace {
 static inline __attribute__((always_inline))
 void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t& rt,
                      int16_t& lx, int16_t& ly, int16_t& rx, int16_t& ry) {
-    b1 = 0;
-    if (p & s_pmUp)    b1 |= XBOX_MASK_UP;
-    if (p & s_pmDown)  b1 |= XBOX_MASK_DOWN;
-    if (p & s_pmLeft)  b1 |= XBOX_MASK_LEFT;
-    if (p & s_pmRight) b1 |= XBOX_MASK_RIGHT;
-    if (p & s_pmStart) b1 |= XBOX_MASK_START;
-    if (p & s_pmBack)  b1 |= XBOX_MASK_BACK;
-    if (p & s_pmLS)    b1 |= XBOX_MASK_LS;
-    if (p & s_pmRS)    b1 |= XBOX_MASK_RS;
+    const uint32_t w = s_lut[0][p & 0xFFu] | s_lut[1][(p >> 8) & 0xFFu]
+                     | s_lut[2][(p >> 16) & 0xFFu] | s_lut[3][(p >> 24) & 0xFFu];
+    b1 = (uint8_t)w;
+    b2 = (uint8_t)(w >> 8);
+    lt = (uint8_t)(w >> 16);   // digital triggers; analog-trigger configs are gated out
+    rt = (uint8_t)(w >> 24);
     // axis invert (Stage 2) -- swap the direction bits. The loop's process() inverts state.dpad
     // before mapping; on a straight digital map that is bit-for-bit identical to swapping here.
     if (s_invY) {   // UP <-> DOWN
@@ -112,13 +118,10 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
         const uint8_t l = b1 & XBOX_MASK_LEFT, r = b1 & XBOX_MASK_RIGHT;
         b1 = (b1 & ~(XBOX_MASK_LEFT | XBOX_MASK_RIGHT)) | (l ? XBOX_MASK_RIGHT : 0) | (r ? XBOX_MASK_LEFT : 0);
     }
-    // 4-way / 8-way filter (Stage 2). The dpad bits are 1<<0..3 in BOTH XBOX_MASK and GAMEPAD_MASK,
-    // so b1's low nibble IS a logical dpad -- run the loop's own pure filterToFourWayMode() on it.
-    // Same code the loop calls, so exact by construction. Order matches process(): invert, then 4-way.
-    if (s_fourWay) {
-        b1 = (uint8_t)((b1 & 0xF0u) | filterToFourWayMode((uint8_t)(b1 & 0x0Fu)));
-    }
-    // SOCD (Stage 2, AFTER 4-way -- process() order is invert, 4-way, then SOCD). Only the two
+    // 4-way mode is NOT here: filterToFourWayMode() keeps press-order history in statics, so
+    // calling it from this ISR raced the loop's process() on that history (and the gate's own call
+    // perturbed it). 4-way is loop-only, like stateful SOCD -- see the gate's whitelist.
+    // SOCD (Stage 2; process() order is invert, then SOCD). Only the two
     // STATELESS modes run here; last/first-win are stateful and stay gated to the loop. This mirrors
     // socd_axis() in input/core/socd.c for neutral/up-priority exactly (dpad bits are 1<<0..3 in both
     // spaces), and the safety gate proves it equals the loop's socd_clean() output live -- so any
@@ -131,16 +134,6 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
         if ((b1 & (XBOX_MASK_LEFT | XBOX_MASK_RIGHT)) == (XBOX_MASK_LEFT | XBOX_MASK_RIGHT))
             b1 &= ~(XBOX_MASK_LEFT | XBOX_MASK_RIGHT);     // Left+Right cancels in both modes
     }
-    b2 = 0;
-    if (p & s_pmLB)   b2 |= XBOX_MASK_LB;
-    if (p & s_pmRB)   b2 |= XBOX_MASK_RB;
-    if (p & s_pmHome) b2 |= XBOX_MASK_HOME;
-    if (p & s_pmA)    b2 |= XBOX_MASK_A;
-    if (p & s_pmB)    b2 |= XBOX_MASK_B;
-    if (p & s_pmX)    b2 |= XBOX_MASK_X;
-    if (p & s_pmY)    b2 |= XBOX_MASK_Y;
-    lt = (p & s_pmL2) ? 0xFFu : 0u;   // digital triggers; analog-trigger configs are gated out
-    rt = (p & s_pmR2) ? 0xFFu : 0u;
 
     // Sticks. Default to CENTER using the loop's exact report conversion (state uint16 -> report
     // int16: X = v + INT16_MIN, Y = ~v + INT16_MIN). For a digital-dpad, no-analog-input config the
@@ -149,14 +142,52 @@ void xinput_straight(uint32_t p, uint8_t& b1, uint8_t& b2, uint8_t& lt, uint8_t&
     lx = rx = (int16_t)((int16_t)GAMEPAD_JOYSTICK_MID + INT16_MIN);
     ly = ry = (int16_t)((int16_t)(~(uint16_t)GAMEPAD_JOYSTICK_MID) + INT16_MIN);
     // Analog-dpad (Stage 2, LAST -- process() converts the fully-processed dpad to a stick after
-    // invert/4-way/SOCD, then zeroes the digital dpad). Same dpadToAnalog* the loop calls, so exact.
+    // invert/SOCD, then zeroes the digital dpad). Inline copy of dpadToAnalogX/Y (GamepadState.cpp):
+    // one axis pressed -> MIN/MAX, none or both -> the driver's centre. Those live in flash and
+    // reach the centre through a virtual call, so the ISR must not call them; the gate proves
+    // this copy equal to the loop's real conversion every pass.
     if (s_dpadMode) {
         const uint8_t dp = (uint8_t)(b1 & 0x0Fu);
-        const int16_t cx = (int16_t)((int16_t)dpadToAnalogX(dp) + INT16_MIN);
-        const int16_t cy = (int16_t)((int16_t)(~dpadToAnalogY(dp)) + INT16_MIN);
+        const uint8_t hx = dp & (GAMEPAD_MASK_LEFT | GAMEPAD_MASK_RIGHT);
+        const uint8_t hy = dp & (GAMEPAD_MASK_UP | GAMEPAD_MASK_DOWN);
+        const uint16_t ax = (hx == GAMEPAD_MASK_LEFT) ? (uint16_t)GAMEPAD_JOYSTICK_MIN
+                          : (hx == GAMEPAD_MASK_RIGHT) ? (uint16_t)GAMEPAD_JOYSTICK_MAX : s_joyMid;
+        const uint16_t ay = (hy == GAMEPAD_MASK_UP) ? (uint16_t)GAMEPAD_JOYSTICK_MIN
+                          : (hy == GAMEPAD_MASK_DOWN) ? (uint16_t)GAMEPAD_JOYSTICK_MAX : s_joyMid;
+        const int16_t cx = (int16_t)((int16_t)ax + INT16_MIN);
+        const int16_t cy = (int16_t)((int16_t)(~ay) + INT16_MIN);
         if (s_dpadMode == 1u) { lx = cx; ly = cy; }   // left-analog
         else                  { rx = cx; ry = cy; }   // right-analog
         b1 &= 0xF0u;   // dpad now lives on the stick; digital nibble -> 0 (loop's dpadOnlyMask)
+    }
+}
+
+// Rebuild s_lut from the current s_pm* masks. Loop-side only, and only while the fast path is
+// disarmed, so the ISR never reads a half-built table. 1024 entries, run once per mapping change.
+static void xinput_build_lut() {
+    for (uint32_t k = 0; k < 4; k++) {
+        for (uint32_t v = 0; v < 256; v++) {
+            const uint32_t p = v << (8u * k);
+            uint32_t b1 = 0, b2 = 0, lt = 0, rt = 0;
+            if (p & s_pmUp)    b1 |= XBOX_MASK_UP;
+            if (p & s_pmDown)  b1 |= XBOX_MASK_DOWN;
+            if (p & s_pmLeft)  b1 |= XBOX_MASK_LEFT;
+            if (p & s_pmRight) b1 |= XBOX_MASK_RIGHT;
+            if (p & s_pmStart) b1 |= XBOX_MASK_START;
+            if (p & s_pmBack)  b1 |= XBOX_MASK_BACK;
+            if (p & s_pmLS)    b1 |= XBOX_MASK_LS;
+            if (p & s_pmRS)    b1 |= XBOX_MASK_RS;
+            if (p & s_pmLB)    b2 |= XBOX_MASK_LB;
+            if (p & s_pmRB)    b2 |= XBOX_MASK_RB;
+            if (p & s_pmHome)  b2 |= XBOX_MASK_HOME;
+            if (p & s_pmA)     b2 |= XBOX_MASK_A;
+            if (p & s_pmB)     b2 |= XBOX_MASK_B;
+            if (p & s_pmX)     b2 |= XBOX_MASK_X;
+            if (p & s_pmY)     b2 |= XBOX_MASK_Y;
+            if (p & s_pmL2)    lt = 0xFFu;
+            if (p & s_pmR2)    rt = 0xFFu;
+            s_lut[k][v] = b1 | (b2 << 8) | (lt << 16) | (rt << 24);
+        }
     }
 }
 
@@ -280,6 +311,30 @@ static bool xinput_control_complete(uint8_t rhport, tusb_control_request_t const
     return true;
 }
 
+// ALWAYS-ARMED, from the USB IRQ itself (TinyUSB 0.21's xfer_isr hook). The instant the report
+// finishes going out, re-arm the endpoint with the report STILL IN DPRAM, so it is never idle and
+// the ISR fast path's in-place stamp ships on the very next poll -- no queue, no tud_task, no
+// loop pass in between, so a loop stall can no longer cost a poll. The buffer handed back IS the
+// DPRAM, so TinyUSB keeps owning the DATA0/1 toggle; its byte-wise self-copy could revert an edge
+// stamp that lands mid-copy, so restamp() re-applies one if it did. Paced by the host's poll.
+// Anything else (OUT endpoint, not ready, no buffer) returns false and runs xfer_callback below.
+static bool __not_in_flash_func(xinput_xfer_isr)(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
+{
+    (void)result;
+    (void)xferred_bytes;
+    if (ep_addr != endpoint_in || endpoint_in == 0 || !tud_ready())
+        return false;
+    uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);
+    if (dpram == nullptr || !usbd_edpt_claim(rhport, endpoint_in))
+        return false;
+    LatencyProbe::wire();   // T2: this report just shipped on the wire -- closes edge->wire
+    const uint32_t seq = GpioDoorbell::stampSeq();
+    usbd_edpt_xfer(rhport, endpoint_in, dpram, sizeof(XInputReport), true);
+    usbd_edpt_release(rhport, endpoint_in);
+    GpioDoorbell::restamp(seq);
+    return true;
+}
+
 static bool xinput_xfer_callback(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
 {
     (void)rhport;
@@ -289,18 +344,16 @@ static bool xinput_xfer_callback(uint8_t rhport, uint8_t ep_addr, xfer_result_t 
     if (ep_addr == endpoint_out)
         usbd_edpt_xfer(0, endpoint_out, xinput_out_buffer, XINPUT_OUT_SIZE, false);
 
-    // ALWAYS-ARMED: the instant a report finishes going out, re-arm the endpoint with the report
-    // STILL IN DPRAM, so it's never idle. This is what lets the ISR fast path's in-place stamp be
-    // sent on the next poll instead of waiting for the loop to notice a change and re-queue. The
-    // buffer we hand back IS the DPRAM (a self-copy -- harmless), so TinyUSB keeps managing the
-    // DATA0/1 toggle. Paced by the host's 1ms poll, so no flood.
+    // ALWAYS-ARMED fallback: xinput_xfer_isr() normally re-arms from the IRQ; it defers here only
+    // when it could not (not ready / no buffer / claim refused). Same re-arm, from tud_task.
     else if (ep_addr == endpoint_in && tud_ready()) {
         LatencyProbe::wire();   // T2: this report just shipped on the wire -- closes edge->wire
         uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);
-        if (dpram != nullptr && !usbd_edpt_busy(0, endpoint_in)) {
-            usbd_edpt_claim(0, endpoint_in);
+        if (dpram != nullptr && usbd_edpt_claim(0, endpoint_in)) {
+            const uint32_t seq = GpioDoorbell::stampSeq();
             usbd_edpt_xfer(0, endpoint_in, dpram, sizeof(XInputReport), false);
             usbd_edpt_release(0, endpoint_in);
+            GpioDoorbell::restamp(seq);
         }
     }
 
@@ -412,6 +465,7 @@ void XInputDriver::initialize() {
         .open = xinput_open,
         .control_xfer_cb = xinput_device_control_request,
         .xfer_cb = xinput_xfer_callback,
+        .xfer_isr = xinput_xfer_isr,
         .sof = NULL
     };
 
@@ -445,23 +499,40 @@ bool XInputDriver::process(Gamepad * gamepad) {
     Gamepad * processedGamepad = Storage::getInstance().GetProcessedGamepad();
     Mask_t values = Storage::getInstance().GetGamepad()->debouncedGpio;
 
-    // One-time: snapshot the pin->button masks and arm the rung-2 ISR fast path. Deferred to here
-    // (not initialize()) so the gamepad's setup() has populated the pin masks and the USB endpoint
-    // is open. Fields first, then registerFastPath LAST, so the ISR never sees a half-built snapshot.
-    if (!s_fastReady && endpoint_in != 0 && gamepad->mapDpadUp && gamepad->mapButtonB1) {
-        s_fastEpIn = endpoint_in;
-        s_pmUp    = gamepad->mapDpadUp->pinMask;    s_pmDown  = gamepad->mapDpadDown->pinMask;
-        s_pmLeft  = gamepad->mapDpadLeft->pinMask;  s_pmRight = gamepad->mapDpadRight->pinMask;
-        s_pmStart = gamepad->mapButtonS2->pinMask;  s_pmBack  = gamepad->mapButtonS1->pinMask;
-        s_pmLS    = gamepad->mapButtonL3->pinMask;  s_pmRS    = gamepad->mapButtonR3->pinMask;
-        s_pmLB    = gamepad->mapButtonL1->pinMask;  s_pmRB    = gamepad->mapButtonR1->pinMask;
-        s_pmHome  = gamepad->mapButtonA1->pinMask;  s_pmA     = gamepad->mapButtonB1->pinMask;
-        s_pmB     = gamepad->mapButtonB2->pinMask;  s_pmX     = gamepad->mapButtonB3->pinMask;
-        s_pmY     = gamepad->mapButtonB4->pinMask;
-        s_pmL2    = gamepad->mapButtonL2->pinMask;   s_pmR2   = gamepad->mapButtonR2->pinMask;
-        s_fastAllBtn = s_pmUp|s_pmDown|s_pmLeft|s_pmRight|s_pmStart|s_pmBack|s_pmLS|s_pmRS
-                     | s_pmLB|s_pmRB|s_pmHome|s_pmA|s_pmB|s_pmX|s_pmY|s_pmL2|s_pmR2;
-        s_fastReady = true;    // snapshot published; the per-loop safety gate below arms/disarms it
+    // Snapshot the pin->button masks for the rung-2 ISR fast path, and RE-snapshot whenever the
+    // mapping changes. Deferred to here (not initialize()) so the gamepad's setup() has populated
+    // the masks and the USB endpoint is open. It used to be taken once, so after a profile switch
+    // the ISR kept stamping the OLD layout: at idle both layouts map to zero, the gate re-armed,
+    // and the next press could ship the wrong button before the loop noticed. Now a change disarms
+    // the ISR first (a loop-side store; no ISR can be mid-fast-path while the loop runs), rewrites
+    // the masks and the lookup, and the gate below re-arms it only if it proves equal again.
+    if (endpoint_in != 0 && gamepad->mapDpadUp && gamepad->mapButtonB1) {
+        const uint32_t pm[17] = {
+            gamepad->mapDpadUp->pinMask,   gamepad->mapDpadDown->pinMask,
+            gamepad->mapDpadLeft->pinMask, gamepad->mapDpadRight->pinMask,
+            gamepad->mapButtonS2->pinMask, gamepad->mapButtonS1->pinMask,
+            gamepad->mapButtonL3->pinMask, gamepad->mapButtonR3->pinMask,
+            gamepad->mapButtonL1->pinMask, gamepad->mapButtonR1->pinMask,
+            gamepad->mapButtonA1->pinMask, gamepad->mapButtonB1->pinMask,
+            gamepad->mapButtonB2->pinMask, gamepad->mapButtonB3->pinMask,
+            gamepad->mapButtonB4->pinMask,
+            gamepad->mapButtonL2->pinMask, gamepad->mapButtonR2->pinMask,
+        };
+        uint32_t* const cur[17] = {
+            &s_pmUp, &s_pmDown, &s_pmLeft, &s_pmRight, &s_pmStart, &s_pmBack, &s_pmLS, &s_pmRS,
+            &s_pmLB, &s_pmRB, &s_pmHome, &s_pmA, &s_pmB, &s_pmX, &s_pmY, &s_pmL2, &s_pmR2,
+        };
+        bool same = s_fastReady && s_fastEpIn == endpoint_in;
+        for (uint32_t i = 0; same && i < 17; i++) same = (*cur[i] == pm[i]);
+        if (!same) {
+            GpioDoorbell::registerFastPath(nullptr);   // disarm BEFORE touching what the ISR reads
+            s_fastReady = false;
+            s_fastEpIn = endpoint_in;
+            s_fastAllBtn = 0;
+            for (uint32_t i = 0; i < 17; i++) { *cur[i] = pm[i]; s_fastAllBtn |= pm[i]; }
+            xinput_build_lut();
+            s_fastReady = true;   // snapshot published; the per-loop safety gate below arms/disarms it
+        }
     }
 
     xinputReport.buttons1 = 0
@@ -563,7 +634,8 @@ bool XInputDriver::process(Gamepad * gamepad) {
         Gamepad* gp = Storage::getInstance().GetGamepad();
         s_invX = opt.invertXAxis;   // publish transform config to the ISR BEFORE we compare or it runs
         s_invY = opt.invertYAxis;
-        s_fourWay = gp->getFourWayModeActive();
+        s_joyMid = GetJoystickMidValue();
+        const bool fourWay = gp->getFourWayModeActive();
         const SOCDMode socdMode = Gamepad::resolveSOCDMode(opt);
         s_socd = (socdMode == SOCD_MODE_NEUTRAL)     ? 1u
                : (socdMode == SOCD_MODE_UP_PRIORITY) ? 2u : 0u;   // 0 also covers bypass (no-op)
@@ -581,9 +653,9 @@ bool XInputDriver::process(Gamepad * gamepad) {
         // PRODUCTION SAFETY -- PROACTIVE whitelist. Arm the ISR ONLY inside the config envelope it
         // provably covers, so a partially-covered mode can never emit even ONE wrong frame before the
         // reactive mappingStraight check would notice. Anything outside falls back to the loop = the
-        // incumbent GP2040 path (known-good). The ISR now handles: invert, sync, debounce, 4-way, the
+        // incumbent GP2040 path (known-good). The ISR now handles: invert, sync, debounce, the
         // STATELESS SOCD modes (neutral/up-priority), and analog-dpad (digital + both analog modes).
-        // Kept on the loop by DESIGN, not TODO: STATEFUL SOCD (last/first-win depend on press-order
+        // Kept on the loop by DESIGN, not TODO: 4-way and STATEFUL SOCD (both depend on press-order
         // history, which the edge-driven ISR and the snapshot-driven loop can't agree on), non-gamepad
         // device types (wheel/guitar/drum -> different report formats), and addon-touched reports
         // (addons run in the loop). mappingStraight (buttons + triggers + sticks) is the final backstop.
@@ -596,7 +668,7 @@ bool XInputDriver::process(Gamepad * gamepad) {
         const bool socdStateless = (socdMode == SOCD_MODE_BYPASS)
                                 || (socdMode == SOCD_MODE_NEUTRAL)
                                 || (socdMode == SOCD_MODE_UP_PRIORITY);
-        const bool eligible = mappingStraight && gamepadType
+        const bool eligible = mappingStraight && gamepadType && !fourWay
                            && dpadModeOk && socdStateless && !g_teAddonTouchedInputs;
         GpioDoorbell::registerFastPath(eligible ? &xinput_fastpath : nullptr);
     }
@@ -621,17 +693,26 @@ bool XInputDriver::process(Gamepad * gamepad) {
                 memcpy(xinputReport._reserved, dpram + offsetof(XInputReport, _reserved),
                        sizeof(xinputReport._reserved));
 #endif
-            usbd_edpt_claim(0, endpoint_in);
-            usbd_edpt_xfer(0, endpoint_in, (uint8_t *)&xinputReport, sizeof(XInputReport), false);
-            usbd_edpt_release(0, endpoint_in);
-            memcpy(last_report, &xinputReport, sizeof(XInputReport));
-            LatencyProbe::report();
-            reportSent = true;
+            // TinyUSB 0.21 panics on an xfer to an armed buffer, and xinput_xfer_isr() arms from
+            // the USB IRQ, so only send if the claim actually succeeded.
+            if (usbd_edpt_claim(0, endpoint_in)) {
+                usbd_edpt_xfer(0, endpoint_in, (uint8_t *)&xinputReport, sizeof(XInputReport), false);
+                usbd_edpt_release(0, endpoint_in);
+                // The copy into DPRAM is byte-wise: re-apply any ISR stamp newer than this report.
+                GpioDoorbell::restamp(GpioDoorbell::seqAtLastRead());
+                memcpy(last_report, &xinputReport, sizeof(XInputReport));
+                LatencyProbe::report();
+                reportSent = true;
+            }
         } else if ( tud_ready() && (endpoint_in != 0) ) {
             uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);   // report already staged for the SIE
             if (dpram != nullptr) {
                 // Freshen CONTENT in place; leave [14..19] to the ISR so its edge stamp survives.
                 memcpy(dpram, &xinputReport, offsetof(XInputReport, _reserved));
+                // This report was built from the pins the loop read at committed(). An edge since
+                // then was already stamped by the ISR and the memcpy just wrote over it with older
+                // bytes -- re-apply the newest committed state if so.
+                GpioDoorbell::restamp(GpioDoorbell::seqAtLastRead());
                 memcpy(last_report, &xinputReport, sizeof(XInputReport));
                 LatencyProbe::report();
                 reportSent = true;

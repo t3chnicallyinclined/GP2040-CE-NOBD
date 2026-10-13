@@ -173,6 +173,17 @@ void GP2040::setup() {
 	// Setup USB Driver
 	DriverManager::getInstance().setup(inputMode);
 
+	// Dreamcast mode needs Maple pins. On a board without them (0xFF, the default) the Dreamcast
+	// driver is never created and no USB driver is either, so run() dereferenced a null driver and
+	// the stick crashed on every boot until it was forced into web config. The default L1 boot
+	// mode IS Dreamcast, so one held button at power-on was enough. Fall back to the saved mode
+	// (or XInput, if Dreamcast is what was saved) and let the save below persist it.
+	if (inputMode == INPUT_MODE_DREAMCAST && DriverManager::getInstance().getDCDriver() == nullptr) {
+		inputMode = (gamepadOptions.inputMode != INPUT_MODE_DREAMCAST) ? gamepadOptions.inputMode
+		                                                               : INPUT_MODE_XINPUT;
+		DriverManager::getInstance().setup(inputMode);
+	}
+
 	if (inputMode != INPUT_MODE_CONFIG) {
 		bool inputModeChanged = inputMode != gamepadOptions.inputMode;
 		if (inputModeChanged) gamepad->setInputMode(inputMode);
@@ -341,6 +352,31 @@ void __not_in_flash_func(GP2040::syncGpioGetAll)() {
 	                                             nobdSyncPolicy(), getMillis());
 }
 
+// Publish the doorbell's front-stage config only when it changes. configSync/configDebounce each
+// take a critical section, and this runs every non-skipped loop pass: re-publishing seven
+// unchanged fields with interrupts off could hold a button edge back by a microsecond or more.
+// A change still publishes on the very pass it happens (hotkey, toggle, web config, profile).
+static void publishFrontStage(bool syncOn, const CoreInput::SyncPolicy& p, bool dbOn, uint32_t dd) {
+	static bool published = false;
+	static bool lastSyncOn = false, lastDbOn = false;
+	static uint32_t lastDd = 0;
+	static CoreInput::SyncPolicy last{};
+	const bool policySame = last.window == p.window && last.releaseDebounce == p.releaseDebounce
+	                     && last.syncedMask == p.syncedMask && last.attackMask == p.attackMask
+	                     && last.eagerCommit == p.eagerCommit && last.preserveWidth == p.preserveWidth;
+	if (!published || syncOn != lastSyncOn || !policySame) {
+		GpioDoorbell::configSync(syncOn, p);
+		lastSyncOn = syncOn;
+		last = p;
+	}
+	if (!published || dbOn != lastDbOn || dd != lastDd) {
+		GpioDoorbell::configDebounce(dbOn, dd);
+		lastDbOn = dbOn;
+		lastDd = dd;
+	}
+	published = true;
+}
+
 // Set each loop: did any addon (turbo/macro/...) modify the report this frame? The XInput ISR
 // fast path bypasses the addons, so it MUST disarm when this is true. Read by the driver's gate.
 // Future-proof -- catches every report-touching addon without enumerating them. See run().
@@ -409,7 +445,21 @@ void GP2040::run() {
 	// input work in steady state -- the ISR + hardware alarm + DPRAM carry it. Disabled when a
 	// USB-host addon integrates input, since that arrives off-stack, not as a GPIO edge.
 	const auto& _addonOpts = Storage::getInstance().getAddonOptions();
-	const bool idleSkipAllowed = !dcMode && !configMode
+	// Same for any loaded addon whose input does not arrive as an edge on a watched button pin:
+	// analog sticks/triggers (ADC, ADS1115/1219/1256, hall-effect), I2C/serial pads and expanders
+	// (Wii, SNES, TG16, PCF8575), the rotary encoder and the BOOTSEL button. With the stick at rest
+	// the gate can arm, the loop would skip ProcessAddons(), and a stick move with no button edge
+	// would not be reported until some button was pressed.
+	static const char* const kEdgelessInputAddons[] = {
+		AnalogName, BootselButtonName, HETriggerAddonName, I2CAnalog1115Name, I2CAnalog1219Name,
+		SPIAnalog1256Name, WiiExtensionName, SNESpadName, TG16padName, PCF8575AddonName,
+		RotaryEncoderName,
+	};
+	bool edgelessInputAddon = false;
+	for (const char* n : kEdgelessInputAddons) {
+		if (addons.GetAddon(n) != nullptr) { edgelessInputAddon = true; break; }
+	}
+	const bool idleSkipAllowed = !dcMode && !configMode && !edgelessInputAddon
 	                          && !_addonOpts.keyboardHostOptions.enabled
 	                          && !_addonOpts.gamepadUSBHostOptions.enabled
 #if TE_SELFTEST_DIAG
@@ -467,8 +517,7 @@ void GP2040::run() {
 			// Stage 4: the doorbell/ISR owns the sync window now. Configure it and read its
 			// committed mask -- the whole system honors the SAME ISR-owned co-registration, and
 			// the commit fires from a hardware alarm (deterministic, CPU asleep), not the loop.
-			GpioDoorbell::configSync(true, nobdSyncPolicy());
-			GpioDoorbell::configDebounce(false, 0);      // sync owns the front stage
+			publishFrontStage(true, nobdSyncPolicy(), false, 0);   // sync owns the front stage
 			gamepad->debouncedGpio = GpioDoorbell::committed();
 		} else {
 			// Stage 3: the doorbell/ISR owns leading-edge debounce now (replaces the loop poll's
@@ -478,8 +527,7 @@ void GP2040::run() {
 			// Sync is off in this branch, so the policy is never consulted. Window still has to be
 			// >= 1: the core asserts 1..SYNC_WINDOW_MAX on first init and a 0 would trip it.
 			const CoreInput::SyncPolicy off{ 1u, false, 0u, 0u, 0u, false };
-			GpioDoorbell::configSync(false, off);
-			GpioDoorbell::configDebounce(dd > 0, dd);
+			publishFrontStage(false, off, dd > 0, dd);
 			gamepad->debouncedGpio = GpioDoorbell::committed();
 		}
 
@@ -680,45 +728,50 @@ GP2040::BootAction GP2040::getGpioMappedBootAction() {
 
 	const GamepadOptions& gamepad = Storage::getInstance().getGamepadOptions();
 	const BootModeOptions& bootModeOptions = Storage::getInstance().getBootModeOptions();
-	// Initialized to the current mode and profile
-	BootAction action = { BootActionType::SET_INPUT_MODE, gamepad.inputMode, gamepad.profileNumber };
+	// Resolved in a lambda so every outcome falls through to ONE deinitializeStandardGpio(): the
+	// early returns used to skip it, leaving the boot-mode pins configured as pulled-up inputs.
+	const BootAction action = [&]() -> BootAction {
+		// Initialized to the current mode and profile
+		BootAction a = { BootActionType::SET_INPUT_MODE, gamepad.inputMode, gamepad.profileNumber };
 
-	switch (System::takeBootMode()) {
-		case System::BootMode::GAMEPAD:
-			return action;
-		case System::BootMode::WEBCONFIG:
-			action.inputMode = InputMode::INPUT_MODE_CONFIG;
-			return action;
-		case System::BootMode::USB:
-			action.type = BootActionType::ENTER_USB_MODE;
-			return action;
-		default:
-			break;
-	}
-	Mask_t gpio = ~gpio_get_all64() & buttonGpios;
-
-	if (gpio == bootModeOptions.usbModePinMask) {
-		action.type = BootActionType::ENTER_USB_MODE;
-		return action;
-	}
-
-	if (gpio == bootModeOptions.webConfigPinMask) {
-		action.inputMode = InputMode::INPUT_MODE_CONFIG;
-		return action;
-	}
-
-	for (size_t i = 0; i < bootModeOptions.inputModeMappings_count; i++) {
-		InputModeMapping m = bootModeOptions.inputModeMappings[i];
-		if (m.pinMask < 0)
-			continue;
-		if (gpio == static_cast<Mask_t>(m.pinMask)) {
-			action.inputMode = static_cast<InputMode>(m.inputMode);
-			if (m.profileNumber > 0) {
-				action.profileNumber = m.profileNumber;
-			}
-			break;
+		switch (System::takeBootMode()) {
+			case System::BootMode::GAMEPAD:
+				return a;
+			case System::BootMode::WEBCONFIG:
+				a.inputMode = InputMode::INPUT_MODE_CONFIG;
+				return a;
+			case System::BootMode::USB:
+				a.type = BootActionType::ENTER_USB_MODE;
+				return a;
+			default:
+				break;
 		}
-	}
+		Mask_t gpio = ~gpio_get_all64() & buttonGpios;
+
+		if (gpio == bootModeOptions.usbModePinMask) {
+			a.type = BootActionType::ENTER_USB_MODE;
+			return a;
+		}
+
+		if (gpio == bootModeOptions.webConfigPinMask) {
+			a.inputMode = InputMode::INPUT_MODE_CONFIG;
+			return a;
+		}
+
+		for (size_t i = 0; i < bootModeOptions.inputModeMappings_count; i++) {
+			InputModeMapping m = bootModeOptions.inputModeMappings[i];
+			if (m.pinMask < 0)
+				continue;
+			if (gpio == static_cast<Mask_t>(m.pinMask)) {
+				a.inputMode = static_cast<InputMode>(m.inputMode);
+				if (m.profileNumber > 0) {
+					a.profileNumber = m.profileNumber;
+				}
+				break;
+			}
+		}
+		return a;
+	}();
 
 	deinitializeStandardGpio();
 	return action;
