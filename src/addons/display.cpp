@@ -34,6 +34,7 @@ bool DisplayAddon::available() {
             gpOptions.font.fontData = GP_Font_Standard;
             gpOptions.font.width = 6;
             gpOptions.font.height = 8;
+            gpOptions.contrast = options.contrast;
             gpDisplay->init(gpOptions);
             setDisplayPower(0);
             delete gpDisplay;
@@ -56,6 +57,7 @@ void DisplayAddon::setup() {
         gpOptions.font.fontData = GP_Font_Standard;
         gpOptions.font.width = 6;
         gpOptions.font.height = 8;
+        gpOptions.contrast = options.contrast;
     } else {
         return;
     }
@@ -194,8 +196,8 @@ void DisplayAddon::setMenuMappings()
     GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
     for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++) {
         switch (pinMappings[pin].action) {
-            case GpioAction::MENU_NAVIGATION_TOGGLE: mapMenuToggle->pinMask |= 1 << pin; break;
-            case GpioAction::MENU_NAVIGATION_SELECT: mapMenuSelect->pinMask |= 1 << pin; break;
+            case GpioAction::MENU_NAVIGATION_TOGGLE: mapMenuToggle->pinMask |= Mask_t{1} << pin; break;
+            case GpioAction::MENU_NAVIGATION_SELECT: mapMenuSelect->pinMask |= Mask_t{1} << pin; break;
             default:    break;
         }
     }

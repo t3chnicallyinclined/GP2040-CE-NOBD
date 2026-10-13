@@ -84,6 +84,7 @@ const defaultValues = {
 	inputHistoryCol: 0,
 	inputHistoryRow: 7,
 	turnOffWhenSuspended: 0,
+	displayContrast: 255,
 };
 
 let buttonLayoutDefinitions = { buttonLayout: {}, buttonLayoutRight: {} };
@@ -108,6 +109,7 @@ const schema = yup.object().shape({
 		.number()
 		.oneOf(ON_OFF_OPTIONS.map((o) => o.value))
 		.label('Invert Display'),
+	displayContrast: yup.number().min(38).max(255).label('Display Contrast'),
 	turnOffWhenSuspended: yup.number().label('Turn Off When Suspended'),
 	buttonLayout: buttonLayoutSchema,
 	buttonLayoutRight: buttonLayoutRightSchema,
@@ -343,6 +345,18 @@ export default function DisplayConfigPage() {
 												))}
 											</FormSelect>
 											<div className="col-sm-3 mb-3">
+												<Form.Label>{`${t('DisplayConfig:form.display-contrast-label')}: ${Math.round((values.displayContrast / 255) * 100)}%`}</Form.Label>
+												<Form.Range
+													name="displayContrast"
+													id="displayContrast"
+													min={38}
+													max={255}
+													step={1}
+													value={values.displayContrast}
+													onChange={handleChange}
+												/>
+											</div>
+											<div className="col-sm-3 mb-3">
 												<label className="form-label">
 													{t('DisplayConfig:form.power-management-header')}
 												</label>
@@ -388,7 +402,9 @@ export default function DisplayConfigPage() {
 															key={`buttonLayout-option-${i}`}
 															value={buttonLayoutDefinitions.buttonLayout[o]}
 														>
-															{t(`LayoutConfig:layouts.left.${o}`)}
+															{t(`LayoutConfig:layouts.left.${o}`, {
+																defaultValue: o,
+															})}
 														</option>
 													),
 												)}
@@ -412,7 +428,9 @@ export default function DisplayConfigPage() {
 														key={`buttonLayoutRight-option-${i}`}
 														value={buttonLayoutDefinitions.buttonLayoutRight[o]}
 													>
-														{t(`LayoutConfig:layouts.right.${o}`)}
+														{t(`LayoutConfig:layouts.right.${o}`, {
+															defaultValue: o,
+														})}
 													</option>
 												))}
 											</FormSelect>
@@ -495,7 +513,9 @@ export default function DisplayConfigPage() {
 																		buttonLayoutDefinitions.buttonLayout[o]
 																	}
 																>
-																	{t(`LayoutConfig:layouts.left.${o}`)}
+																	{t(`LayoutConfig:layouts.left.${o}`, {
+																		defaultValue: o,
+																	})}
 																</option>
 															))}
 														</FormSelect>
@@ -591,7 +611,9 @@ export default function DisplayConfigPage() {
 																		buttonLayoutDefinitions.buttonLayoutRight[o]
 																	}
 																>
-																	{t(`LayoutConfig:layouts.right.${o}`)}
+																	{t(`LayoutConfig:layouts.right.${o}`, {
+																		defaultValue: o,
+																	})}
 																</option>
 															))}
 														</FormSelect>

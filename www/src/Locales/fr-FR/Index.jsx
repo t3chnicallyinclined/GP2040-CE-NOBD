@@ -1,0 +1,47 @@
+import Common from './Common';
+import HomePage from './HomePage';
+import Navigation from './Navigation';
+import SettingsPage from './SettingsPage';
+import ResetSettings from './ResetSettings';
+import Components from './Components';
+import PinMapping from './PinMapping';
+import PeripheralMapping from './PeripheralMapping';
+import LedConfigPage from './LedConfigPage';
+import BackupPage from './BackupPage';
+import DisplayConfig from './DisplayConfig';
+import AddonsConfig from './AddonsConfig';
+import CaptureButton from './CaptureButton';
+import WiiAddon from './Addons/WiiAddon';
+import Rotary from './Addons/Rotary';
+import PCF8575 from './Addons/PCF8575';
+import ReactiveLED from './Addons/ReactiveLED';
+import HETrigger from './Addons/HETrigger';
+import InputMacroAddon from './InputMacroAddon';
+import LayoutConfig from './LayoutConfig';
+import Proto from './Proto/Index';
+import BootModeMapping from './BootModeMapping';
+
+export default {
+	Common,
+	HomePage,
+	Navigation,
+	SettingsPage,
+	ResetSettings,
+	Components,
+	PinMapping,
+	PeripheralMapping,
+	LedConfigPage,
+	BackupPage,
+	DisplayConfig,
+	AddonsConfig,
+	CaptureButton,
+	WiiAddon,
+	Rotary,
+	InputMacroAddon,
+	LayoutConfig,
+	PCF8575,
+	ReactiveLED,
+	Proto,
+	HETrigger,
+	BootModeMapping,
+};

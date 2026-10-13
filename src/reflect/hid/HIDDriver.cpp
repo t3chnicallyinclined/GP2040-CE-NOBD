@@ -92,6 +92,14 @@ bool HIDDriver::process(Gamepad * gamepad) {
 		| (gamepad->pressedE11()   ? GAMEPAD_MASK_E11    : 0)
 		| (gamepad->pressedE12()   ? GAMEPAD_MASK_E12    : 0)
 	;
+	if (gamepad->hasAnalogTriggers || gamepad->hasLeftAnalogStick) {
+		if (gamepad->state.lt > 0)
+			hidReport.buttons |= GAMEPAD_MASK_L2;
+	}
+	if (gamepad->hasAnalogTriggers || gamepad->hasRightAnalogStick) {
+		if (gamepad->state.rt > 0)
+			hidReport.buttons |= GAMEPAD_MASK_R2;
+	}
 
 	// Wake up TinyUSB device
 	if (tud_suspended())
@@ -126,6 +134,9 @@ bool HIDDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_contr
 }
 
 const uint16_t * HIDDriver::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
+    if (index >= TU_ARRAY_SIZE(hid_string_descriptors))
+        return nullptr;
+
     char *value;
     // Check for override settings
     GamepadOptions & gamepadOptions = Storage::getInstance().getGamepadOptions();
@@ -139,6 +150,7 @@ const uint16_t * HIDDriver::get_descriptor_string_cb(uint8_t index, uint16_t lan
                 break;
             case 3:
                 value = gamepadOptions.usbDescVersion;
+                break;
             default:
                 value = (char *)hid_string_descriptors[index];
                 break;

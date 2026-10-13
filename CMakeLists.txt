@@ -4,9 +4,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.1.1)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.1.1)
+set(sdkVersion 2.3.1)
+set(toolchainVersion 15_2_Rel1)
+set(picotoolVersion 2.3.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -16,6 +16,37 @@ if(DEFINED ENV{PICO_BOARD})
   set(PICO_BOARD $ENV{PICO_BOARD} CACHE STRING "Board type")
 else()
   set(PICO_BOARD pico CACHE STRING "Board type")
+endif()
+
+if(DEFINED ENV{PICO_PLATFORM})
+  set(PICO_PLATFORM $ENV{PICO_PLATFORM} CACHE STRING "Board platform")
+else()
+  set(PICO_PLATFORM rp2040 CACHE STRING "Board platform")
+endif()
+
+if(DEFINED ENV{GP2040_BOARDCONFIG})
+  set(GP2040_BOARDCONFIG $ENV{GP2040_BOARDCONFIG})
+elseif(NOT DEFINED GP2040_BOARDCONFIG)
+  set(GP2040_BOARDCONFIG Pico)
+endif()
+
+# check for existing cmake files in the event of changing PICO_BOARD or PICO_PLATFORM
+if (GP2040_BOARDCONFIG)
+  message("GP2040-CE board config is set: ${GP2040_BOARDCONFIG}")
+  set(GP2040_BOARD_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/configs/${GP2040_BOARDCONFIG}/${GP2040_BOARDCONFIG}.cmake")
+
+  if (EXISTS "${GP2040_BOARD_CONFIG_FILE}")
+    # include the board config file
+    message(STATUS "Using board config file: ${GP2040_BOARD_CONFIG_FILE}")
+    message(STATUS "${PICO_BOARD_HEADER_DIRS}")
+
+    set(PICO_BOARD_HEADER_DIRS "${CMAKE_CURRENT_LIST_DIR}/configs/${GP2040_BOARDCONFIG}")
+
+    include("${GP2040_BOARD_CONFIG_FILE}")
+  else()
+    # skip the config and fall back to defaults
+    # message(FATAL_ERROR "GP2040_BOARDCONFIG '${GP2040_BOARDCONFIG}' not found.\n" "Expected: ${GP2040_BOARD_CONFIG_FILE}")
+  endif()
 endif()
 
 cmake_minimum_required(VERSION 3.10...4.0)
@@ -28,8 +59,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # note: this must happen before project()
 include(pico_sdk_import.cmake)
 
-if (PICO_SDK_VERSION_STRING VERSION_LESS "2.1.1")
-  message(FATAL_ERROR "Raspberry Pi Pico SDK version 2.1.1 (or later) required. Your version is ${PICO_SDK_VERSION_STRING}")
+if (PICO_SDK_VERSION_STRING VERSION_LESS "2.3.1")
+  message(FATAL_ERROR "Raspberry Pi Pico SDK version 2.3.1 (or later) required. Your version is ${PICO_SDK_VERSION_STRING}")
 endif()
 
 # set the version for webconfig, etc. based on git
@@ -72,12 +103,6 @@ message("GIT_REPO_BUILD_ID is ${GIT_REPO_BUILD_ID}")
 project(GP2040-CE-NOBD LANGUAGES C CXX ASM VERSION ${CMAKE_GIT_REPO_VERSION})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
-
-if(DEFINED ENV{GP2040_BOARDCONFIG})
-  set(GP2040_BOARDCONFIG $ENV{GP2040_BOARDCONFIG})
-elseif(NOT DEFINED GP2040_BOARDCONFIG)
-  set(GP2040_BOARDCONFIG Pico)
-endif()
 
 if(DEFINED ENV{SKIP_SUBMODULES})
   set(SKIP_SUBMODULES $ENV{SKIP_SUBMODULES})
@@ -161,6 +186,8 @@ compile_proto()
 #pull in tinyUSB
 set(PICO_TINYUSB_PATH "${CMAKE_CURRENT_LIST_DIR}/lib/tinyusb")
 
+set(PICO_USE_FASTEST_SUPPORTED_CLOCK 1)
+
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
@@ -172,7 +199,7 @@ add_subdirectory(lib)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # Activate some compiler / linker options to aid us with diagnosing stack space issues in Debug builds
-  add_compile_options(-fstack-usage -Wstack-usage=500)
+  add_compile_options(-fstack-usage -Wstack-usage=500 -Wnull-dereference -Wcast-align -Wimplicit-fallthrough)
   add_compile_definitions(PICO_USE_STACK_GUARDS=1)
 endif()
 
@@ -254,9 +281,14 @@ src/reflect/ps3/PS3Driver.cpp
 src/reflect/ps4/PS4Auth.cpp
 src/reflect/ps4/PS4AuthUSBListener.cpp
 src/reflect/ps4/PS4Driver.cpp
+src/reflect/p5general/P5GeneralAuth.cpp
+src/reflect/p5general/P5GeneralAuthUSBListener.cpp
+src/reflect/p5general/P5GeneralDriver.cpp
 src/reflect/psclassic/PSClassicDriver.cpp
+src/reflect/sinput/SInputDriver.cpp
 src/reflect/switch/SwitchDriver.cpp
 src/reflect/switchpro/SwitchProDriver.cpp
+src/reflect/switch2pro/Switch2ProDriver.cpp
 src/reflect/xbone/XBOneAuth.cpp
 src/reflect/xbone/XBOneAuthUSBListener.cpp
 src/reflect/xbone/XBOneDriver.cpp
@@ -275,7 +307,6 @@ src/reflect/dreamcast/DreamcastVMU.cpp
 src/net/w6100.cpp
 src/hal/i2c/i2cdevicebase.cpp
 src/hal/i2c/pcf8575/pcf8575.cpp
-src/hal/i2c/ssd1306/obd_ssd1306.cpp
 src/hal/i2c/ssd1306/tiny_ssd1306.cpp
 src/ui/display/ui/elements/GPWidget.cpp
 src/ui/display/ui/elements/GPButton.cpp
@@ -316,6 +347,7 @@ src/addons/buzzerspeaker.cpp
 src/addons/dualdirectional.cpp
 src/addons/keyboard_host.cpp
 src/addons/keyboard_host_listener.cpp
+src/addons/i2canalog1115.cpp
 src/addons/i2canalog1219.cpp
 src/addons/i2c_gpio_pcf8575.cpp
 src/addons/display.cpp
@@ -327,6 +359,7 @@ src/addons/reverse.cpp
 src/addons/drv8833_rumble.cpp
 src/addons/turbo.cpp
 src/addons/slider_socd.cpp
+src/addons/slider_profile.cpp
 src/addons/wiiext.cpp
 src/addons/input_macro.cpp
 src/addons/snes_input.cpp
@@ -337,12 +370,22 @@ src/addons/gamepad_usb_host_listener.cpp
 src/addons/tg16_input.cpp
 src/ui/animation/animation.cpp
 src/ui/animation/animationstation.cpp
+src/ui/animation/effects/burstcolor.cpp
 src/ui/animation/effects/chase.cpp
-src/ui/animation/effects/customtheme.cpp
-src/ui/animation/effects/customthemepressed.cpp
+src/ui/animation/effects/idletimeout.cpp
+src/ui/animation/effects/jigglestaticcolor.cpp
+src/ui/animation/effects/jiggletwostaticcolor.cpp
+src/ui/animation/effects/rain.cpp
 src/ui/animation/effects/rainbow.cpp
+src/ui/animation/effects/randomcolor.cpp
 src/ui/animation/effects/staticcolor.cpp
-src/ui/animation/effects/statictheme.cpp
+src/hosts/DualsensePS5Host.cpp
+src/hosts/DualshockPS4Host.cpp
+src/hosts/GoogleStadioHost.cpp
+src/hosts/DrivingForceHost.cpp
+src/hosts/Ultrastik360Host.cpp
+src/hosts/SwitchProHost.cpp
+src/hosts/Xbox360Host.cpp
 ${PROTO_OUTPUT_DIR}/enums.pb.c
 ${PROTO_OUTPUT_DIR}/config.pb.c
 )
@@ -363,10 +406,10 @@ tinyusb_host
 tinyusb_pico_pio_usb
 CRC32
 FlashPROM
+ADS1115
 ADS1219
 ADS1256
 NeoPico
-OneBitDisplay
 ArduinoJson
 rndis
 hardware_adc
@@ -392,6 +435,7 @@ headers/drivers/dreamcast
 headers/events
 headers/interfaces
 headers/interfaces/i2c
+headers/interfaces/i2c/ads1115
 headers/interfaces/i2c/ads1219
 headers/interfaces/i2c/pcf8575
 headers/interfaces/i2c/ssd1306
@@ -405,6 +449,7 @@ headers/display/ui/elements
 headers/display/ui/screens
 headers/animationstation
 headers/animationstation/effects
+headers/hosts
 configs/${GP2040_BOARDCONFIG}
 ${PROTO_OUTPUT_DIR}
 ${CMAKE_BINARY_DIR}/headers
@@ -430,7 +475,7 @@ install(FILES
     DESTINATION .
 )
 
-if (NOT (DEFINED ENV(CI)) AND (EXISTS ${CMAKE_SOURCE_DIR}/modules/Custom.cmake))
+if (NOT (DEFINED ENV{CI}) AND (EXISTS ${CMAKE_SOURCE_DIR}/modules/Custom.cmake))
   message(STATUS "Found custom script.")
 	include(${CMAKE_SOURCE_DIR}/modules/Custom.cmake)
 endif()

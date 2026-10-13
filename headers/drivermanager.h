@@ -28,11 +28,11 @@ public:
     InputMode getInputMode(){ return inputMode; }
     bool isConfigMode(){ return (inputMode == INPUT_MODE_CONFIG); }
 private:
-    DriverManager() {}
-    GPDriver * driver;
+    DriverManager() = default;
+    GPDriver * driver = nullptr;
     DreamcastDriver * dcDriver = nullptr;
     DreamcastDriver * dcDriverP2 = nullptr;
-    InputMode inputMode;
+    InputMode inputMode = INPUT_MODE_XINPUT;
 };
 
 #endif

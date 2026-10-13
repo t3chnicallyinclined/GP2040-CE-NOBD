@@ -36,8 +36,8 @@ bool PSClassicDriver::process(Gamepad * gamepad) {
 	}
 
 	psClassicReport.buttons |=
-          (gamepad->pressedS2()    ? PSCLASSIC_MASK_SELECT   : 0)
-		| (gamepad->pressedS1()    ? PSCLASSIC_MASK_START    : 0)
+          (gamepad->pressedS2()    ? PSCLASSIC_MASK_START   : 0)
+		| (gamepad->pressedS1()    ? PSCLASSIC_MASK_SELECT    : 0)
 		| (gamepad->pressedB1()    ? PSCLASSIC_MASK_CROSS    : 0)
 		| (gamepad->pressedB2()    ? PSCLASSIC_MASK_CIRCLE   : 0)
 		| (gamepad->pressedB3()    ? PSCLASSIC_MASK_SQUARE   : 0)
@@ -47,6 +47,14 @@ bool PSClassicDriver::process(Gamepad * gamepad) {
 		| (gamepad->pressedL2()    ? PSCLASSIC_MASK_L2       : 0)
 		| (gamepad->pressedR2()    ? PSCLASSIC_MASK_R2       : 0)
 	;
+	if (gamepad->hasAnalogTriggers || gamepad->hasLeftAnalogStick) {
+		if (gamepad->state.lt > 0)
+			psClassicReport.buttons |= PSCLASSIC_MASK_L2;
+	}
+	if (gamepad->hasAnalogTriggers || gamepad->hasRightAnalogStick) {
+		if (gamepad->state.rt > 0)
+			psClassicReport.buttons |= PSCLASSIC_MASK_R2;
+	}
 
 	// Wake up TinyUSB device
 	if (tud_suspended())
@@ -79,6 +87,9 @@ bool PSClassicDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb
 }
 
 const uint16_t * PSClassicDriver::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
+	if (index >= TU_ARRAY_SIZE(psclassic_string_descriptors))
+		return nullptr;
+
 	const char *value = (const char *)psclassic_string_descriptors[index];
 	return getStringDescriptor(value, index); // getStringDescriptor returns a static array
 }

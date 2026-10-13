@@ -23,13 +23,11 @@ bool I2CAnalog1219Input::available() {
 }
 
 void I2CAnalog1219Input::setup() {
-    const AnalogADS1219Options& options = Storage::getInstance().getAddonOptions().analogADS1219Options;
-
     memset(&pins, 0, sizeof(ADS_PINS));
     channelHop = 0;
 
     uIntervalMS = 1;
-    nextTimer = getMillis();
+    lastPoll = getMillis() - uIntervalMS;
 
     // Init our ADS1219 library
     ads->begin();                               // setup I2C and chip start
@@ -43,7 +41,7 @@ void I2CAnalog1219Input::setup() {
 
 void I2CAnalog1219Input::process()
 {
-    if (nextTimer < getMillis()) {
+    if (getMillis() - lastPoll > uIntervalMS) {
         float result;
         uint32_t readValue;
         if ( ads->readRegister(STATUS) & REGISTER_STATUS_DRDY ) {
@@ -52,7 +50,7 @@ void I2CAnalog1219Input::process()
             pins.A[channelHop] = result;
             channelHop = (channelHop+1) % 4; // Loop 0-3
             ads->setChannel(channelHop);
-            nextTimer = getMillis() + uIntervalMS; // interval for read (we can't be too fast)
+            lastPoll = getMillis(); // interval for read (we can't be too fast)
         }
     }
 

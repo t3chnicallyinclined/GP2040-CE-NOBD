@@ -4,6 +4,7 @@
 #include "drivermanager.h"
 #include "pico/stdlib.h"
 #include "version.h"
+#include <algorithm>
 
 void DisplaySaverScreen::init() {
     const DisplayOptions& options = Storage::getInstance().getDisplayOptions();
@@ -52,14 +53,11 @@ void DisplaySaverScreen::drawScreen() {
 
 int8_t DisplaySaverScreen::update() {
     if (!DriverManager::getInstance().isConfigMode()) {
-        uint16_t buttonState = getGamepad()->state.buttons;
-        if (prevButtonState && !buttonState) {
-            if (prevButtonState != 0) {
-                prevButtonState = 0;
-                return DisplayMode::BUTTONS;
-            }
+        Gamepad * gamepad = Storage::getInstance().GetGamepad();
+        
+        if (gamepad->state.buttons || gamepad->state.dpad) {
+            return DisplayMode::BUTTONS;
         }
-        prevButtonState = buttonState;
     }
 
     return -1; // -1 means no change in screen state
@@ -82,10 +80,7 @@ void DisplaySaverScreen::drawSnowScene() {
                 uint8_t speed = snowflakeSpeeds[x][y];
                 uint8_t newY = y + speed;
                 int8_t drift = snowflakeDrift[x][y];
-                int8_t newX = x + drift;
-
-                if (newX < 0) newX = 0;
-                if (newX >= SCREEN_WIDTH) newX = SCREEN_WIDTH - 1;
+                int8_t newX = std::clamp((x + drift), 0, (SCREEN_WIDTH - 1));
 
                 if (newY >= SCREEN_HEIGHT) {
                     getRenderer()->drawPixel(x, y, 0);

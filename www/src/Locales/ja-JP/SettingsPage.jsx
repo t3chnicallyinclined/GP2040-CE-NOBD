@@ -51,7 +51,8 @@ export default {
 	},
 	'profile-label': 'プロファイル',
 	'debounce-delay-label': 'チャタリング除去ディレイ(ミリ秒)',
-	'mini-menu-gamepad-input': 'ディスプレイメニューの入力にゲームパッド入力を利用',
+	'mini-menu-gamepad-input':
+		'ディスプレイメニューの入力にゲームパッド入力を利用',
 	'ps4-mode-explanation-text':
 		'PS4モードはGP2040-CEコントローラを認証済みPS4コントローラとして動作させることができます。',
 	'ps4-mode-warning-text':
@@ -151,7 +152,6 @@ export default {
 	'forced-setup-mode-modal-body':
 		'保存後にコントローラモードで再起動すると、以降Web設定モードにはアクセスできなくなります。注意点をよく理解したうえで、保存ボタンを有効化するには「{{warningCheckText}}」を以下に入力してください。閉じるボタンを押下した場合はこの設定は元に戻され保存されます。',
 	'4-way-joystick-mode-label': '4方向ジョイスティックモード',
-	'lock-hotkeys-label': 'ホットキーをロック',
 	'keyboard-mapping-header-text': 'キーボードキー割り当て',
 	'keyboard-mapping-sub-header-text':
 		'以下のフォームを利用してボタンとキーの割り当て変更をしてください。',

@@ -55,6 +55,14 @@ bool SwitchDriver::process(Gamepad * gamepad) {
 		| (gamepad->pressedA1() ? SWITCH_MASK_HOME    : 0)
 		| (gamepad->pressedA2() ? SWITCH_MASK_CAPTURE : 0)
 	;
+	if (gamepad->hasAnalogTriggers || gamepad->hasLeftAnalogStick) {
+		if (gamepad->state.lt > 0)
+			switchReport.buttons |= SWITCH_MASK_ZL;
+	}
+	if (gamepad->hasAnalogTriggers || gamepad->hasRightAnalogStick) {
+		if (gamepad->state.rt > 0)
+			switchReport.buttons |= SWITCH_MASK_ZR;
+	}
 
 	switchReport.lx = static_cast<uint8_t>(gamepad->state.lx >> 8);
 	switchReport.ly = static_cast<uint8_t>(gamepad->state.ly >> 8);
@@ -92,6 +100,9 @@ bool SwitchDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_co
 }
 
 const uint16_t * SwitchDriver::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
+	if (index >= TU_ARRAY_SIZE(switch_string_descriptors))
+		return nullptr;
+
 	const char *value = (const char *)switch_string_descriptors[index];
 	return getStringDescriptor(value, index); // getStringDescriptor returns a static array
 }

@@ -24,10 +24,21 @@ const API_BINDING = {
 		get: WebApi.getGamepadOptions,
 		set: WebApi.setGamepadOptions,
 	},
-	led: { get: WebApi.getLedOptions, set: WebApi.setLedOptions },
-	ledTheme: {
-		get: WebApi.getCustomTheme,
-		set: WebApi.setCustomTheme,
+	keyboard: {
+		get: WebApi.getKeyMappings,
+		set: WebApi.setKeyMappings,
+	},
+	ledOptions: {
+		get: WebApi.getLedOptions,
+		set: WebApi.setLedOptions,
+	},
+	ledAnimations: {
+		get: WebApi.getAnimationOptions,
+		set: WebApi.setAnimationOptions,
+	},
+	ledLayout: {
+		get: WebApi.getLightsDataOptions,
+		set: WebApi.setLightsDataOptions,
 	},
 	macros: {
 		get: WebApi.getMacroAddonOptions,
@@ -42,8 +53,8 @@ const API_BINDING = {
 		set: WebApi.setProfileOptions,
 	},
 	heTrigger: {
-		get: WebApi.getHETriggerOptions,
-		set: WebApi.setHETriggerOptions,
+		get: WebApi.getHETriggerCalibrations,
+		set: WebApi.setHETriggerCalibrations,
 	},
 	addons: {
 		get: WebApi.getAddonsOptions,

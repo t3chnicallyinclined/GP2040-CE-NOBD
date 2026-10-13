@@ -16,7 +16,6 @@ void GPShape::draw() {
     }
 
     uint16_t offsetX = ((getRenderer()->getDriver()->getMetrics()->width - (uint16_t)((double)(this->getViewport().right - this->getViewport().left) * scaleX)) / 2);
-    uint16_t offsetY = ((getRenderer()->getDriver()->getMetrics()->height - (uint16_t)((double)(this->getViewport().bottom - this->getViewport().top) * scaleY)) / 2);
 
     if (scaleX > 0.0f) {
         baseX = ((this->x) * scaleX + this->getViewport().left) + offsetX;
@@ -35,8 +34,6 @@ void GPShape::draw() {
     } else if (this->_shape == GP_SHAPE_SQUARE) {
         uint16_t sizeX = (this->_sizeX) * scaleX + this->getViewport().left;
         uint16_t sizeY = (this->_sizeY) * scaleY + this->getViewport().top;
-        uint16_t width = this->_sizeX - baseX;
-        uint16_t height = this->_sizeY - baseY;
 
         getRenderer()->drawRectangle(baseX, baseY, sizeX+offsetX, sizeY, this->strokeColor, this->fillColor, this->_angle);
     } else if (this->_shape == GP_SHAPE_LINE) {
@@ -54,8 +51,6 @@ void GPShape::draw() {
     } else if (this->_shape == GP_SHAPE_PILL) {
         uint16_t sizeX = (this->_sizeX) * scaleX + this->getViewport().left;
         uint16_t sizeY = (this->_sizeY) * scaleY + this->getViewport().top;
-        uint16_t width = this->_sizeX - baseX;
-        uint16_t height = this->_sizeY - baseY;
 
         getRenderer()->drawPill(baseX, baseY, sizeX+offsetX, sizeY, this->strokeColor, this->fillColor, this->_angle);
     }
