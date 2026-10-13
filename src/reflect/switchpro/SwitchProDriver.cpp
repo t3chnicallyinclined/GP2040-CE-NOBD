@@ -7,8 +7,6 @@
 #define SWITCH_PRO_KEEPALIVE_TIMER 5
 
 void SwitchProDriver::initialize() {
-    //stdio_init_all();
-
     playerID = 0;
     last_report_counter = 0;
     handshakeCounter = 0;
@@ -111,6 +109,8 @@ bool SwitchProDriver::process(Gamepad * gamepad) {
     switchReport.inputs.buttonRightSL = 0;
     switchReport.inputs.buttonR = gamepad->pressedR1();
     switchReport.inputs.buttonZR = gamepad->pressedR2();
+    if (gamepad->hasAnalogTriggers || gamepad->hasRightAnalogStick)
+        switchReport.inputs.buttonZR |= gamepad->state.rt > 0;
     switchReport.inputs.buttonMinus = gamepad->pressedS1();
     switchReport.inputs.buttonPlus = gamepad->pressedS2();
     switchReport.inputs.buttonThumbR = gamepad->pressedR3();
@@ -121,6 +121,8 @@ bool SwitchProDriver::process(Gamepad * gamepad) {
     switchReport.inputs.buttonLeftSL = 0;
     switchReport.inputs.buttonL = gamepad->pressedL1();
     switchReport.inputs.buttonZL = gamepad->pressedL2();
+    if (gamepad->hasAnalogTriggers || gamepad->hasLeftAnalogStick)
+        switchReport.inputs.buttonZL |= gamepad->state.lt > 0;
 
     // analog
     uint16_t scaleLeftStickX = scale16To12(gamepad->state.lx);
@@ -273,6 +275,8 @@ void SwitchProDriver::handleConfigReport(uint8_t switchReportID, uint8_t switchR
 }
 
 void SwitchProDriver::handleFeatureReport(uint8_t switchReportID, uint8_t switchReportSubID, const uint8_t *reportData, uint16_t reportLength) {
+    if (reportLength < 11) return;
+
     uint8_t commandID = reportData[10];
     uint32_t spiReadAddress = 0;
     uint8_t spiReadSize = 0;
@@ -365,6 +369,8 @@ void SwitchProDriver::handleFeatureReport(uint8_t switchReportID, uint8_t switch
             //printf("\n");
             break;
         case SwitchCommands::SPI_READ:
+            if (reportLength < 16 || reportData[15] > sizeof(report) - 20) return;
+
             //printf("SwitchProDriver::set_report: Rpt 0x01 SPI_READ\n");
             spiReadAddress = (reportData[14] << 24) | (reportData[13] << 16) | (reportData[12] << 8) | (reportData[11]);
             spiReadSize = reportData[15];
@@ -484,7 +490,7 @@ void SwitchProDriver::handleFeatureReport(uint8_t switchReportID, uint8_t switch
 }
 
 void SwitchProDriver::set_report(uint8_t report_id, hid_report_type_t report_type, const uint8_t *buffer, uint16_t bufsize) {
-    if (report_type != HID_REPORT_TYPE_OUTPUT) return;
+    if (report_type != HID_REPORT_TYPE_OUTPUT || bufsize < 2 || bufsize > sizeof(report)) return;
 
     memset(report, 0x00, bufsize);
 
@@ -509,7 +515,8 @@ void SwitchProDriver::readSPIFlash(uint8_t* dest, uint32_t address, uint8_t size
     //printf("Address: %08x, Bank: %04x, Offset: %04x, Size: %d\n", address, addressBank, addressOffset, size);
     std::map<uint32_t, const uint8_t*>::iterator it = spiFlashData.find(addressBank);
 
-    if (it != spiFlashData.end()) {
+    if (it != spiFlashData.end() &&
+        addressOffset + size <= (addressBank == 0x6000 ? sizeof(factoryConfigData) : sizeof(userCalibrationData))) {
         // address found
         const uint8_t* data = it->second;
         memcpy(dest, data+addressOffset, size);
@@ -528,6 +535,9 @@ bool SwitchProDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb
 }
 
 const uint16_t * SwitchProDriver::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
+	if (index >= TU_ARRAY_SIZE(switch_pro_string_descriptors))
+		return nullptr;
+
 	const char *value = (const char *)switch_pro_string_descriptors[index];
 	return getStringDescriptor(value, index); // getStringDescriptor returns a static array
 }

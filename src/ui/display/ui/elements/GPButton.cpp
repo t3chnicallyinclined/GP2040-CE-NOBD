@@ -5,7 +5,7 @@ void GPButton::draw() {
     // new style button:
     uint16_t baseX = this->x;
     uint16_t baseY = this->y;
-    Mask_t pinValues = ~gpio_get_all();
+    Mask_t pinValues = ~gpio_get_all64();
 
     // scale to viewport
     double scaleX = this->getScaleX();
@@ -19,7 +19,6 @@ void GPButton::draw() {
     }
 
     uint16_t offsetX = ((getRenderer()->getDriver()->getMetrics()->width - (uint16_t)((double)(this->getViewport().right - this->getViewport().left) * scaleX)) / 2);
-    uint16_t offsetY = ((getRenderer()->getDriver()->getMetrics()->height - (uint16_t)((double)(this->getViewport().bottom - this->getViewport().top) * scaleY)) / 2);
 
     if (scaleX > 0.0f) {
         baseX = ((this->x) * scaleX + this->getViewport().left) + offsetX;
@@ -76,7 +75,7 @@ void GPButton::draw() {
         turboState = (getGamepad()->turboState.buttons & this->_inputMask);
     } else if (_inputType == GP_ELEMENT_DIR_BUTTON) {
         // direction button mask
-        buttonState = getProcessedGamepad()->pressedDpad(this->_inputMask);
+        buttonState = getProcessedGamepad()->pressedDpadPhysical(this->_inputMask);
         useMask = true;
 
         if ((this->_inputMask & GAMEPAD_MASK_UP) == GAMEPAD_MASK_UP) {
@@ -110,6 +109,9 @@ void GPButton::draw() {
             case GpioAction::BUTTON_PRESS_R3: turboState |= (getGamepad()->turboState.buttons & GAMEPAD_MASK_R3); break;
             default: break;
         }
+    } else if (_inputType == GP_ELEMENT_HE_BUTTON) {
+        pinState = ((getProcessedGamepad()->state.heTriggers >> this->_inputMask) & 0x01);
+        buttonState = true;
     }
 
     if (useMask && mapMask != NULL) {
@@ -126,7 +128,7 @@ void GPButton::draw() {
         }
     }
 
-    state = (buttonState ? pinState : 0);
+    state = (useMask ? buttonState : pinState);
 
     // base
     if (this->_shape == GP_SHAPE_ELLIPSE) {

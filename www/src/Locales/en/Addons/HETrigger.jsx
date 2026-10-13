@@ -1,6 +1,7 @@
 export default {
 	'header-text': 'Hall-Effect Trigger',
-	'desc-header-text': 'Hall Effect Trigger Supports 4-Channel, 8-Channel, and 16-Channel Multiplexers.',
+	'desc-header-text':
+		'Hall Effect Trigger Supports 4-Channel, 8-Channel, and 16-Channel Multiplexers.',
 	'available-pins-text': 'Available ADC pins: {{pins}}',
 	'multiplexer-channel-select': 'Channels Per Multiplexer',
 	'direct-no-mux': 'Direct (No Mux)',
@@ -11,10 +12,15 @@ export default {
 	'select-pin-1': 'Select Pin 1',
 	'select-pin-2': 'Select Pin 2',
 	'select-pin-3': 'Select Pin 3',
+	'separate-select-pins-label': 'Enable Separate Select Pins',
 	'adc-pin-0': 'ADC Pin 0',
 	'adc-pin-1': 'ADC Pin 1',
 	'adc-pin-2': 'ADC Pin 2',
 	'adc-pin-3': 'ADC Pin 3',
+	'adc-pin-4': 'ADC Pin 4',
+	'adc-pin-5': 'ADC Pin 5',
+	'adc-pin-6': 'ADC Pin 6',
+	'adc-pin-7': 'ADC Pin 7',
 	'action-assignment-sub-header': 'Hall-Effect Action Assignment',
 	'multiplexer-label': 'Multiplexer',
 	'channel-label': 'Channel',
@@ -23,8 +29,11 @@ export default {
 	'voltage-table-header-text': 'Hall-Effect Voltage Table',
 	'voltage-table-idle-text': 'Idle',
 	'voltage-table-trigger-text': 'Trigger',
-	'voltage-table-max-text': 'Max',
+	'voltage-table-pressed-text': 'Pressed',
 	'voltage-table-polarity-text': 'Polarity',
+	'voltage-table-rapid-trigger-text': 'Rapid Trigger',
+	'voltage-table-release-text': 'Rapid Trigger Threshold',
+	'voltage-table-noise-text': 'Rapid Trigger Noise Filter',
 	'voltage-table-disabled-label': '(Disabled)',
 	'overwrite-all-warning': 'Overwrite All Triggers',
 	'overwrite-confirm': 'Confirm Overwrite All Triggers',
@@ -38,22 +47,28 @@ export default {
 	'pressed-text': 'Pressed!',
 	'idle-input-text': 'Idle Voltage',
 	'activation-input-text': 'Activation Voltage',
+	'rapid-trigger-threshold-input-text': 'Rapid Trigger Threshold',
+	'rapid-trigger-noise-input-text': 'Rapid Trigger Noise Filter',
 	'pressed-input-text': 'Pressed Voltage',
 	'activation-reading-text': 'Activation Point Reading:',
 	'calibrate-all-button': 'Calibrate All 🧲',
 	'calibration-header-text': 'Hall-Effect Calibration',
 	'calibration-idle-text': 'Idle Voltage Reading:',
 	'calibration-pressed-text': 'Pressed Voltage Reading:',
-	'calibration-trigger-text': 'Trigger Voltage',
-	'calibration-flip-polarity': 'Flip Polarity (Not Supported)',
+	'calibration-flip-polarity': 'Flip Polarity',
+	'calibration-flip-rapid-trigger': 'Enable Rapid Trigger',
 	'calibration-back-button': 'Back',
-	'calibration-first-step': 'We need to calibrate the idle voltage and full press voltage of the hall-effect switch. ' +
-								'After calibration, we can adjust the trigger-activation point to our desired depth. ' +
-								'First, let\'s calibrate the idle voltage. Leave the hall-effect button untouched and click the "Calibrate Idle" button.',
-	'calibration-second-step': 'Next, press the button fully to reach our maximum depth. Activation position can be adjusted after calibration.',
-	'calibration-third-step': 'Finally, let\'s adjust our current activation point and set the desired trigger point. '+
-								'Once adjusted, press the button and verify it activates at the desired position.',
-	'calibration-manual-step': 'Please adjust the following attributes of the hall effect button to the desired amounts. '+
-							    'Once the desired values have been found, you can copy these values and set all triggers '+
-							    'on the device.',
+	'calibration-first-step':
+		'We need to calibrate the idle voltage and full press voltage of the hall-effect switch. ' +
+		'After calibration, we can adjust the trigger-activation point to our desired depth. ' +
+		'First, let\'s calibrate the idle voltage. Leave the hall-effect button untouched and click the "Calibrate Idle" button.',
+	'calibration-second-step':
+		'Next, press the button fully to reach our maximum depth. Activation position can be adjusted after calibration.',
+	'calibration-third-step':
+		"Finally, let's adjust our current activation point and set the desired trigger point. " +
+		'Once adjusted, press the button and verify it activates at the desired position.',
+	'calibration-manual-step':
+		'Please adjust the following attributes of the hall effect button to the desired amounts. ' +
+		'Once the desired values have been found, you can copy these values and set all triggers ' +
+		'on the device.',
 };

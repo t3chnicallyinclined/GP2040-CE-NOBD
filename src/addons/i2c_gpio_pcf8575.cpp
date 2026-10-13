@@ -4,7 +4,6 @@
 #include "config.pb.h"
 
 bool PCF8575Addon::available() {
-    const DisplayOptions& displayOptions = Storage::getInstance().getDisplayOptions();
     const PCF8575Options& options = Storage::getInstance().getAddonOptions().pcf8575Options;
     if (options.enabled) {
         pcf = new PCF8575();
@@ -29,7 +28,7 @@ void PCF8575Addon::setup() {
     for (uint8_t i = 0; i < options.pins_count; i++) {
         GpioMappingInfo pin = gpioMappings[i];
         if ((pin.action != GpioAction::NONE) && (pin.action != GpioAction::RESERVED) && (pin.action != GpioAction::ASSIGNED_TO_ADDON)) {
-            pinRef.insert({i,pin});
+            pinRef.emplace(i, pin);
         }
     }
 
@@ -44,10 +43,11 @@ void PCF8575Addon::setup() {
 void PCF8575Addon::process()
 {
     Gamepad * gamepad = Storage::getInstance().GetGamepad();
+    uint16_t pins = pcf->receive();
 
     for (std::map<uint8_t, GpioMappingInfo>::iterator pin = pinRef.begin(); pin != pinRef.end(); ++pin) {
         if (pin->second.direction == GpioDirection::GPIO_DIRECTION_INPUT) {
-            uint8_t pinRaw = pcf->getPin(pin->first);
+            uint8_t pinRaw = (pins >> pin->first) & 1;
             bool pinValue = (bool)(!(pinRaw == 1));
             switch (pin->second.action) {
                 case GpioAction::BUTTON_PRESS_UP:    inputButtonUp = pinValue; break;

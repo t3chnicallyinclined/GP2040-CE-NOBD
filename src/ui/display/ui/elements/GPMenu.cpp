@@ -4,12 +4,6 @@
 
 void GPMenu::draw() {
     if (this->getVisibility()) {
-        uint16_t baseX = this->x;
-        uint16_t baseY = this->y;
-
-        uint16_t menuWidth = this->menuSizeX * 6;
-        uint16_t menuHeight = this->menuSizeY * 8;
-
         uint16_t dataSize = this->getDataSize();
         uint16_t totalPages = (dataSize + this->menuSizeY - 1) / this->menuSizeY;
         uint16_t itemPage = (this->menuIndex / this->menuSizeY);
@@ -21,11 +15,11 @@ void GPMenu::draw() {
             currPageItems = 0;
         }
 
-        getRenderer()->drawText((21-this->menuTitle.length()) / 2, 0, this->menuTitle.c_str());
+        getRenderer()->drawText((21-this->menuTitle.length()) / 2, 0, this->menuTitle);
 
         std::string pageDisplay = "";
         pageDisplay += "Page: " + std::to_string(itemPage+1) + "/" + std::to_string(totalPages);
-        getRenderer()->drawText(11, 7, pageDisplay.c_str());
+        getRenderer()->drawText(11, 7, pageDisplay);
 
         if (this->menuEntryData->size() > 0) {
             for (uint8_t menuLine = 0; menuLine < currPageItems; menuLine++) {

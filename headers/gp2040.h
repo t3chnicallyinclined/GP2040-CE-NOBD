@@ -6,6 +6,10 @@
 #ifndef GP2040_H_
 #define GP2040_H_
 
+#ifndef WEB_CONFIG_HOSTNAME
+#define WEB_CONFIG_HOSTNAME "gp2040-ce"
+#endif
+
 #include <map>
 
 // GP2040 Classes
@@ -53,30 +57,20 @@ private:
     };
     RebootHotkeys rebootHotkeys;
 
-    enum class BootAction {
-        NONE,
-        ENTER_WEBCONFIG_MODE,
-        ENTER_USB_MODE,
-        SET_INPUT_MODE_SWITCH,
-        SET_INPUT_MODE_XINPUT,
-        SET_INPUT_MODE_KEYBOARD,
-        SET_INPUT_MODE_GENERIC,
-        SET_INPUT_MODE_NOBD_HID,
-        SET_INPUT_MODE_PS3,
-        SET_INPUT_MODE_PS4,
-        SET_INPUT_MODE_PS5,
-        SET_INPUT_MODE_XBONE,
-        SET_INPUT_MODE_NEOGEO,
-        SET_INPUT_MODE_MDMINI,
-        SET_INPUT_MODE_PCEMINI,
-        SET_INPUT_MODE_EGRET,
-        SET_INPUT_MODE_ASTRO,
-        SET_INPUT_MODE_PSCLASSIC,
-        SET_INPUT_MODE_XBOXORIGINAL,
-        SET_INPUT_MODE_SWITCH_PRO,
-        SET_INPUT_MODE_DREAMCAST,
-    };
-    BootAction getBootAction();
+    enum class BootActionType {
+			ENTER_USB_MODE,
+			SET_INPUT_MODE
+		};
+
+		struct BootAction {
+			BootActionType type = BootActionType::SET_INPUT_MODE;
+			InputMode inputMode = INPUT_MODE_XINPUT;
+			uint32_t profileNumber = 0;
+		};
+
+		BootAction getGpioMappedBootAction();
+		BootAction getButtonMappedBootAction();
+
     void getReinitGamepad(Gamepad * gamepad);
 
     // GPIO manipulation for setup and profile reinit
@@ -84,11 +78,8 @@ private:
     void deinitializeStandardGpio();
 
     // event handling checking
-    void checkRawState(GamepadState prevState, GamepadState currState);
-    void checkProcessedState(GamepadState prevState, GamepadState currState);
-
-    // input mask, action
-    std::map<uint32_t, int32_t> bootActions;
+    void checkRawState(const GamepadState& prevState, const GamepadState& currState);
+    void checkProcessedState(const GamepadState& prevState, const GamepadState& currState);
 
     void checkSaveRebootState();
     bool saveRequested = false;

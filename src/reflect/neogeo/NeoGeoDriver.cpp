@@ -65,6 +65,14 @@ bool NeoGeoDriver::process(Gamepad * gamepad) {
 		| (gamepad->pressedR1() ? NEOGEO_MASK_R1      : 0)
 		| (gamepad->pressedR2() ? NEOGEO_MASK_R2      : 0)
 	;
+	if (gamepad->hasAnalogTriggers || gamepad->hasLeftAnalogStick) {
+		if (gamepad->state.lt > 0)
+			neogeoReport.buttons |= NEOGEO_MASK_L2;
+	}
+	if (gamepad->hasAnalogTriggers || gamepad->hasRightAnalogStick) {
+		if (gamepad->state.rt > 0)
+			neogeoReport.buttons |= NEOGEO_MASK_R2;
+	}
 
 	// Wake up TinyUSB device
 	if (tud_suspended())
@@ -99,6 +107,9 @@ bool NeoGeoDriver::vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_co
 }
 
 const uint16_t * NeoGeoDriver::get_descriptor_string_cb(uint8_t index, uint16_t langid) {
+	if (index >= TU_ARRAY_SIZE(neogeo_string_descriptors))
+		return nullptr;
+
 	const char *value = (const char *)neogeo_string_descriptors[index];
 	return getStringDescriptor(value, index); // getStringDescriptor returns a static array
 }

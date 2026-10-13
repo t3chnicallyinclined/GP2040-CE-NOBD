@@ -14,16 +14,17 @@ void XInputAuth::initialize() {
         listener = new XInputAuthUSBListener();
         xinputAuthData.xinputState = auth_idle_state;
         xinputAuthData.authCompleted = false;
-        ((XInputAuthUSBListener*)listener)->setup();
         ((XInputAuthUSBListener*)listener)->setAuthData(&xinputAuthData);
+        ((XInputAuthUSBListener*)listener)->setup();
     } else {
         // Generate a serial number from the pico's unique ID
         uint8_t serial[0x0C];
 		pico_unique_board_id_t id;
 		pico_get_unique_board_id(&id);
-        for(int i = 0; i < 0x0C; i++) {
-            serial[i] = 'A' + (id.id[i]%25); // some alphanumeric from 'A' to 'Z'
+        for (size_t i = 0; i < sizeof(serial); i++) {
+            serial[i] = 'A' + (id.id[i % sizeof(id.id)] % 26); // some alphanumeric from 'A' to 'Z'
         }
+        
         xsm3_set_vid_pid(serial, 0x045E, 0x028E);
         xsm3_initialise_state();
         xsm3_set_identification_data(xsm3_id_data_ms_controller);

@@ -128,7 +128,7 @@ bool xid_get_report(uint8_t index, void *report, uint16_t len)
     //Most games send to control pipe, but some send to out pipe. THPSX2 atleast
     if (tud_ready() && !usbd_edpt_busy(TUD_OPT_RHPORT, _xid_itf[index].ep_out))
     {
-        usbd_edpt_xfer(TUD_OPT_RHPORT, _xid_itf[index].ep_out, _xid_itf[index].ep_out_buff, len);
+        usbd_edpt_xfer(TUD_OPT_RHPORT, _xid_itf[index].ep_out, _xid_itf[index].ep_out_buff, len, false);
     }
     return true;
 }
@@ -153,13 +153,13 @@ bool xid_send_report(uint8_t index, void *report, uint16_t len)
     memcpy(_xid_itf[index].in, report, len);
 
     //Send it to the host
-    return usbd_edpt_xfer(TUD_OPT_RHPORT, _xid_itf[index].ep_in, _xid_itf[index].in, len);
+    return usbd_edpt_xfer(TUD_OPT_RHPORT, _xid_itf[index].ep_in, _xid_itf[index].in, len, false);
 }
 
 static bool xid_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
 {
     (void)rhport;
-    uint8_t index = get_index_by_ep_addr(ep_addr);
+    int8_t index = get_index_by_ep_addr(ep_addr);
 
     TU_VERIFY(result == XFER_RESULT_SUCCESS, true);
     TU_VERIFY(index != -1, true);
@@ -177,7 +177,7 @@ bool xid_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t c
 {
     TU_VERIFY(request->bmRequestType_bit.recipient == TUSB_REQ_RCPT_INTERFACE);
 
-    uint8_t index = get_index_by_itfnum((uint8_t)request->wIndex);
+    int8_t index = get_index_by_itfnum((uint8_t)request->wIndex);
     TU_VERIFY(index != -1, false);
 
     bool ret = false;
