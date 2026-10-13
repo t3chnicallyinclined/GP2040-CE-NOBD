@@ -70,6 +70,7 @@ jobs:
     needs: build-web
     runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false
       matrix:
         include:
           - board: RP2040AdvancedBreakoutBoard
@@ -81,7 +82,7 @@ jobs:
           - board: WaveshareZero
             cmake_extra: ""
           - board: W6100EVBPico2
-            cmake_extra: "-DPICO_BOARD=pico2"
+            cmake_extra: "-DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350"
           # Pico2 (RP2350) removed — untested on RP2350 hardware
 
     steps:
