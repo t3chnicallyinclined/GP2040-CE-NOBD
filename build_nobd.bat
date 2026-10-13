@@ -9,7 +9,7 @@ if exist "build\_deps\pico_sdk-src" (
 ) else (
     set PICO_SDK_PATH=
     set PICO_SDK_FETCH_FROM_GIT=on
-    set PICO_SDK_FETCH_FROM_GIT_TAG=2.1.1
+    set PICO_SDK_FETCH_FROM_GIT_TAG=2.3.1
     set FETCH_FLAG=
 )
 
