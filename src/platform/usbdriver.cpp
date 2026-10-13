@@ -10,6 +10,21 @@
 #include "tusb.h"
 #include "drivermanager.h"
 #include "storagemanager.h"
+#include "hardware/structs/usb_dpram.h"
+
+// NOBD hot-buffer hook: the DPRAM data buffer the SIE is serving for an endpoint, so the report
+// already staged there can be overwritten in place (a new press updates the pending report instead
+// of waiting to re-queue). Read straight from the endpoint control register, where TinyUSB's
+// rp2040 dcd records the buffer offset when it opens the endpoint -- no TinyUSB patch needed.
+// NULL if the endpoint is not open (EP0 or a cleared control word, e.g. after a bus reset).
+extern "C" uint8_t* __not_in_flash_func(dcd_rp2040_ep_dpram)(uint8_t ep_addr) {
+	const uint8_t epnum = ep_addr & 0x0Fu;
+	if (epnum == 0) return nullptr;
+	const uint32_t ctrl = (ep_addr & 0x80u) ? usb_dpram->ep_ctrl[epnum - 1].in
+	                                         : usb_dpram->ep_ctrl[epnum - 1].out;
+	if (!(ctrl & EP_CTRL_ENABLE_BITS)) return nullptr;
+	return (uint8_t*)usb_dpram + (ctrl & 0xFFC0u);
+}
 
 static bool usb_mounted;
 static bool usb_suspended;
