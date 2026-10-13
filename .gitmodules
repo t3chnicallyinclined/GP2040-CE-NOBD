@@ -1,7 +1,7 @@
 [submodule "lib/tinyusb"]
 	path = lib/tinyusb
 	url = https://github.com/t3chnicallyinclined/tinyusb.git
-	branch = nobd/0.21-ctrl-timeout
+	branch = nobd-0.21-ctrl-timeout
 [submodule "lib/pico_pio_usb"]
 	path = lib/pico_pio_usb
 	url = https://github.com/speedypotato/Pico-PIO-USB.git
