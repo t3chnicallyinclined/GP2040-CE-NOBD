@@ -28,6 +28,13 @@ namespace GpioDoorbell {
     // Total button edges observed (diagnostic; wraps). Lets a bench confirm the silicon
     // is seeing presses without touching the loop.
     uint32_t edgeCount();
+    // Stamp sequence: bumped each time an ISR writes the staged report. A non-atomic writer of
+    // that buffer samples stampSeq() before its copy and calls restamp(seq) after; if an ISR
+    // stamp landed in between, the fast path re-applies the newest committed state.
+    uint32_t stampSeq();
+    void restamp(uint32_t seq0);
+    // stampSeq() as of the loop's last committed() -- the newest stamp the loop's report reflects.
+    uint32_t seqAtLastRead();
 
     // Register a RAM-pinned callback run INSIDE the edge/timer ISRs -- the "fast path" (rung 2).
     // It is handed the sync-committed pressed mask and formats+stages its report immediately,

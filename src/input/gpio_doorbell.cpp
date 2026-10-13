@@ -91,6 +91,19 @@ inline uint32_t ctz32(uint32_t v) {
 
 volatile uint32_t g_edges   = 0;
 volatile bool     g_changed = false;
+// Bumped every time an ISR stamps the staged report (doorbell or commit alarm). A writer that
+// copies over that buffer non-atomically -- the endpoint re-arm, the loop's in-place freshen --
+// samples it first and calls restamp() after, so an edge that landed mid-copy is re-applied
+// instead of being overwritten by the older bytes. See GpioDoorbell::restamp().
+volatile uint32_t g_stampSeq = 0;
+// The loop's view: g_stampSeq as of its last committed() read, i.e. the newest stamp the loop's
+// own report already reflects.
+uint32_t          s_seqAtRead = 0;
+// committed() steps the stage only when it has to: before the first step after (re)init or a
+// policy change, or when there is no hardware alarm and the loop poll IS the commit. Otherwise
+// every owed event already wakes the CPU (edge IRQ or ledger alarm), and the loop's extra step
+// was a no-op that still held interrupts off for its whole critical section.
+volatile bool     s_needStep = true;
 
 // The rung-2 fast path: a driver-supplied builder run in the edge/timer ISRs, handed the
 // sync-committed pressed mask. Function pointer (single slot). Read from the ISRs, written once.
@@ -294,7 +307,7 @@ void __not_in_flash_func(sync_alarm_irq)() {
     timer_hw->intr = 1u << (uint)s_alarm;   // W1C: ack this alarm
     s_alarmArmed = false;   // this one has fired; stepSync() re-arms for whatever is still owed
     if (stepSync()) {
-        auto fp = g_fastpath; if (fp) fp(s_committed);
+        auto fp = g_fastpath; if (fp) { fp(s_committed); g_stampSeq++; }
         g_changed = true;   // the loop must re-read committed() so display/addons see the commit too
     }
 }
@@ -316,7 +329,7 @@ void __not_in_flash_func(doorbell_irq)() {
     // Step the front stage on the edge and, if the committed state changed, stage the report NOW
     // (the report is built on the EDGE's clock, not the loop's). A press inside an open sync
     // window doesn't change committed yet -- it commits from the alarm at the deadline.
-    if (stepSync()) { auto fp = g_fastpath; if (fp) fp(s_committed); }
+    if (stepSync()) { auto fp = g_fastpath; if (fp) { fp(s_committed); g_stampSeq++; } }
     g_edges++;
     g_changed = true;
 }
@@ -335,6 +348,11 @@ void init(uint32_t buttonMask) {
             // Claim reserves the alarm number; we then take its vector outright instead of
             // registering an SDK callback, and enable the alarm's interrupt at the timer.
             irq_set_exclusive_handler((uint)(TIMER_IRQ_0 + s_alarm), &sync_alarm_irq);
+            // Same priority as the button-edge IRQ (highest). At the default it tied with USBCTRL,
+            // and M0+ does not preempt an equal-priority ISR, so a commit deadline that fell inside
+            // a USB interrupt waited for it to finish. Equal to the doorbell, so neither preempts
+            // the other -- both step s_sync, and both already do it inside a critical section.
+            irq_set_priority((uint)(TIMER_IRQ_0 + s_alarm), PICO_HIGHEST_IRQ_PRIORITY);
             irq_set_enabled((uint)(TIMER_IRQ_0 + s_alarm), true);
             hw_set_bits(&timer_hw->inte, 1u << (uint)s_alarm);
         }
@@ -348,6 +366,7 @@ void init(uint32_t buttonMask) {
         const bool on = (buttonMask & (1u << pin)) != 0u;
         gpio_set_irq_enabled(pin, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, on);
     }
+    s_needStep = true;   // new pin set: take one step so a button already held is seen
     // Tournament determinism: the button edge -> report path must be the FIRST thing the core
     // services, so an in-flight USB or timer IRQ can never delay it. Give the GPIO bank the highest
     // priority (0), same as the Maple bus -- this squeezes the worst-case edge->ISR jitter, not the
@@ -365,6 +384,21 @@ bool __not_in_flash_func(consumeChanged)() {
 }
 
 uint32_t edgeCount() { return g_edges; }
+
+uint32_t __not_in_flash_func(stampSeq)() { return g_stampSeq; }
+
+uint32_t seqAtLastRead() { return s_seqAtRead; }
+
+void __not_in_flash_func(restamp)(uint32_t seq0) {
+    // Cheap test first: no ISR stamp since seq0 means nothing was overwritten.
+    if (g_stampSeq == seq0) return;
+    // Re-apply the newest committed state with interrupts off, so a further edge cannot land
+    // between our read of s_committed and our stores (it runs, in full, after we finish).
+    const uint32_t save = save_and_disable_interrupts();
+    auto fp = g_fastpath;
+    if (fp) fp(s_committed);
+    restore_interrupts(save);
+}
 
 void registerFastPath(void (*fn)(uint32_t committed)) { g_fastpath = fn; }
 
@@ -387,6 +421,7 @@ void configSync(bool active, const CoreInput::SyncPolicy& policy) {
     s_sync.preserve_width   = policy.preserveWidth && !policy.releaseDebounce;
     if (s_syncActive != active) ledgerClear();   // mode switch: the ledger belongs to the other stage
     s_syncActive            = active;
+    s_needStep              = true;   // re-evaluate committed under the new policy
     restore_interrupts(save);
 }
 
@@ -395,13 +430,21 @@ void configDebounce(bool active, uint32_t delayMs) {
     s_debounceDelay  = delayMs;
     if (s_debounceActive != active) ledgerClear();
     s_debounceActive = active;
+    s_needStep       = true;
     restore_interrupts(save);
 }
 
 uint32_t committed() {
-    // Step with the current pins too: catches a button held at boot (no edge to trigger the ISR)
-    // and backstops the event-driven commit. Does NOT stage a report -- the loop's own path does.
-    stepSync();
+    // Step with the current pins only when something can be owed that no IRQ will deliver: the
+    // first read after init / a policy change (a button held at boot has no edge), or no hardware
+    // alarm (the loop poll is then the commit). Every other event is edge- or alarm-driven, so a
+    // loop step here only re-derived the same state with interrupts held off. Does NOT stage a
+    // report -- the loop's own path does.
+    if (s_needStep || s_alarm < 0) {
+        s_needStep = false;
+        stepSync();
+    }
+    s_seqAtRead = g_stampSeq;
     return s_committed;
 }
 

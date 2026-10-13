@@ -447,6 +447,10 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     // to the original deadline, so a third button still joins the chord instead of landing a
     // frame late -- without that, this would split every 3-button input.
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdEagerCommit, 2);
+    // The core accepts 0 (off) or 2..4 pending attacks; anything larger is not a NOBD value.
+    if (config.gamepadOptions.nobdEagerCommit > 4) {
+        config.gamepadOptions.nobdEagerCommit = 2;
+    }
     INIT_UNSET_PROPERTY(config.gamepadOptions, nobdPreserveWidth, true);
     // USB polling interval (ms). Only 1/2/4/8 are offered; anything else falls back to 1 ms.
     INIT_UNSET_PROPERTY(config.gamepadOptions, usbPollInterval, DEFAULT_USB_POLL_INTERVAL);
@@ -2162,6 +2166,79 @@ void migrateMacroPinsToGpio(Config& config) {
     }
 }
 
+// A config written by UPSTREAM GP2040-CE (Switch 2 Pro era or later) uses numbers NOBD already
+// owns, so nanopb decodes upstream values straight into NOBD fields: field 34 (Switch 2 Pro colour
+// preset, default 0) lands in nobdSyncDelay and turns the sync window off, colour words land in
+// the Dreamcast pins and eager-commit, P5General/SInput (16/17) boot as Dreamcast/NOBD HID, and
+// upstream's stick hotkeys and slider positions shift onto NOBD's toggle. NOBD's own numbers stay
+// put (existing NOBD users keep their settings), so detect the upstream layout and translate it.
+//
+// Detection: upstream writes RGB colour words where NOBD keeps a GPIO number (36/37 -> Dreamcast
+// pins, which NOBD only ever stores as 0..47 or 0xFF) and an eager-commit count (53, 0..4 in NOBD).
+// A colour value above those ranges cannot come from NOBD.
+static void nobdUpstreamConfigMigration(Config& config)
+{
+    if (!config.has_gamepadOptions) return;
+    GamepadOptions& g = config.gamepadOptions;
+    const bool upstreamLayout = (g.has_dreamcastPinA && g.dreamcastPinA > 0xFF)
+                             || (g.has_dreamcastPinB && g.dreamcastPinB > 0xFF)
+                             || (g.has_nobdEagerCommit && g.nobdEagerCommit > 4);
+    if (!upstreamLayout) return;
+
+    // Fields 34-54 hold upstream colour/identity values, not NOBD settings: unset them so
+    // initUnsetPropertiesWithDefaults() gives every one its NOBD/board default.
+    g.has_nobdSyncDelay = false;       g.has_nobdReleaseDebounce = false;
+    g.has_dreamcastPinA = false;       g.has_dreamcastPinB = false;
+    g.has_dcSyncMode = false;          g.has_dcSyncWindow = false;
+    g.has_disableVMU = false;          g.has_zeroLatencyMode = false;
+    g.has_dreamcastP2PinA = false;     g.has_dreamcastP2PinB = false;
+    g.has_dreamcastUartRxPin = false;  g.has_maplecastEnabled = false;
+    g.has_maplecastServerIP1 = false;  g.has_maplecastServerIP2 = false;
+    g.has_maplecastServerIP3 = false;  g.has_maplecastServerIP4 = false;
+    g.has_maplecastServerPort = false; g.has_maplecastPlayerSlot = false;
+    g.has_nobdSyncDirections = false;  g.has_nobdEagerCommit = false;
+    g.has_nobdPreserveWidth = false;
+
+    // Input modes: upstream P5General = 16, SInput = 17 -> NOBD's 20 / 21.
+    auto mode = [](int32_t m) -> int32_t { return m == 16 ? INPUT_MODE_P5GENERAL : m == 17 ? INPUT_MODE_SINPUT : m; };
+    if (g.has_inputMode) g.inputMode = (InputMode)mode(g.inputMode);
+    int32_t* const bootModes[] = { &g.inputModeB1, &g.inputModeB2, &g.inputModeB3, &g.inputModeB4,
+                                   &g.inputModeL1, &g.inputModeL2, &g.inputModeR1, &g.inputModeR2 };
+    for (int32_t* m : bootModes) *m = mode(*m);
+    if (config.has_bootModeOptions) {
+        for (pb_size_t i = 0; i < config.bootModeOptions.inputModeMappings_count; i++) {
+            InputModeMapping& im = config.bootModeOptions.inputModeMappings[i];
+            if (im.has_inputMode) im.inputMode = (InputMode)mode(im.inputMode);
+        }
+    }
+
+    // Hotkeys: upstream LS/RS directions + reboot-webconfig/usb were 78..87; NOBD's are 79..88.
+    if (config.has_hotkeyOptions) {
+        HotkeyOptions& h = config.hotkeyOptions;
+        HotkeyEntry* const hk[] = { &h.hotkey01, &h.hotkey02, &h.hotkey03, &h.hotkey04,
+                                    &h.hotkey05, &h.hotkey06, &h.hotkey07, &h.hotkey08,
+                                    &h.hotkey09, &h.hotkey10, &h.hotkey11, &h.hotkey12,
+                                    &h.hotkey13, &h.hotkey14, &h.hotkey15, &h.hotkey16 };
+        for (HotkeyEntry* e : hk) {
+            if (e->has_action && e->action >= 78 && e->action <= 87)
+                e->action = (GamepadHotkey)(e->action + 1);
+        }
+    }
+
+    // Pin actions: upstream profile-slider positions were 131..138; NOBD's are 132..139.
+    auto pins = [](GpioMappings& m) {
+        for (pb_size_t i = 0; i < m.pins_count; i++) {
+            if (m.pins[i].has_action && m.pins[i].action >= 131 && m.pins[i].action <= 138)
+                m.pins[i].action = (GpioAction)(m.pins[i].action + 1);
+        }
+    };
+    if (config.has_gpioMappings) pins(config.gpioMappings);
+    if (config.has_profileOptions) {
+        for (pb_size_t k = 0; k < config.profileOptions.gpioMappingsSets_count; k++)
+            pins(config.profileOptions.gpioMappingsSets[k]);
+    }
+}
+
 // populate existing configurations' buttonsMask and auxMask to mirror behavior
 // from the behavior before this code merged. totally new configs get their
 // board defaults via initUnsetPropertiesWithDefaults
@@ -2294,6 +2371,9 @@ void ConfigUtils::load(Config& config)
         // We could neither deserialize Protobuf config data nor legacy config data.
         // We are probably dealing with a new device and therefore initialize the config to default values.
         config = Config Config_init_default;
+    } else {
+        // Translate a config written by upstream GP2040-CE before any default is filled in.
+        nobdUpstreamConfigMigration(config);
     }
 
     // run migrations

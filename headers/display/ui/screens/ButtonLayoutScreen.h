@@ -169,6 +169,7 @@ class ButtonLayoutScreen : public GPScreen {
             {INPUT_MODE_CONFIG, 3}, 
             {INPUT_MODE_PS4, 4},
             {INPUT_MODE_PS5, 4},
+            {INPUT_MODE_P5GENERAL, 4},
             {INPUT_MODE_PSCLASSIC, 4},
             {INPUT_MODE_MDMINI, 5},
             {INPUT_MODE_NEOGEO, 6},

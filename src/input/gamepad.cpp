@@ -190,6 +190,38 @@ void Gamepad::setup()
 	hotkeys[13] = hotkeyOptions.hotkey14;
 	hotkeys[14] = hotkeyOptions.hotkey15;
 	hotkeys[15] = hotkeyOptions.hotkey16;
+
+	buildReadTable();
+}
+
+void Gamepad::buildReadTable()
+{
+	const struct { GamepadButtonMapping* m; bool dpad; uint8_t shift; } src[] = {
+		{ mapDpadUp, true, 0 },     { mapDpadDown, true, 0 },
+		{ mapDpadLeft, true, 0 },   { mapDpadRight, true, 0 },
+		{ mapDigitalUp, true, 4 },  { mapDigitalDown, true, 4 },
+		{ mapDigitalLeft, true, 4 },{ mapDigitalRight, true, 4 },
+		{ mapButtonB1, false, 0 },  { mapButtonB2, false, 0 },  { mapButtonB3, false, 0 },
+		{ mapButtonB4, false, 0 },  { mapButtonL1, false, 0 },  { mapButtonR1, false, 0 },
+		{ mapButtonL2, false, 0 },  { mapButtonR2, false, 0 },  { mapButtonS1, false, 0 },
+		{ mapButtonS2, false, 0 },  { mapButtonL3, false, 0 },  { mapButtonR3, false, 0 },
+		{ mapButtonA1, false, 0 },  { mapButtonA2, false, 0 },  { mapButtonA3, false, 0 },
+		{ mapButtonA4, false, 0 },  { mapButtonE1, false, 0 },  { mapButtonE2, false, 0 },
+		{ mapButtonE3, false, 0 },  { mapButtonE4, false, 0 },  { mapButtonE5, false, 0 },
+		{ mapButtonE6, false, 0 },  { mapButtonE7, false, 0 },  { mapButtonE8, false, 0 },
+		{ mapButtonE9, false, 0 },  { mapButtonE10, false, 0 }, { mapButtonE11, false, 0 },
+		{ mapButtonE12, false, 0 },
+	};
+	static_assert(sizeof(src) / sizeof(src[0]) == sizeof(readTable) / sizeof(readTable[0]),
+	              "readTable must hold every digital mapping");
+	readTableCount = 0;
+	for (const auto& s : src) {
+		if (s.m == nullptr || s.m->pinMask == 0) continue;
+		ReadEntry& e = readTable[readTableCount++];
+		e.pin     = s.m->pinMask;
+		e.buttons = s.dpad ? 0u : s.m->buttonMask;
+		e.dpad    = s.dpad ? (uint8_t)(s.m->buttonMask << s.shift) : 0u;
+	}
 }
 
 /**
@@ -367,47 +399,19 @@ void __not_in_flash_func(Gamepad::read)()
 	state.aux = 0
 		| (values & mapButtonFn->pinMask)   ? mapButtonFn->buttonMask : 0;
 
-	state.dpad = 0
-		| ((values & mapDpadUp->pinMask)       ? mapDpadUp->buttonMask              : 0)
-		| ((values & mapDpadDown->pinMask)     ? mapDpadDown->buttonMask            : 0)
-		| ((values & mapDpadLeft->pinMask)     ? mapDpadLeft->buttonMask            : 0)
-		| ((values & mapDpadRight->pinMask)    ? mapDpadRight->buttonMask           : 0)
-		| ((values & mapDigitalUp->pinMask)    ? (mapDigitalUp->buttonMask << 4)    : 0)
-		| ((values & mapDigitalDown->pinMask)  ? (mapDigitalDown->buttonMask << 4)  : 0)
-		| ((values & mapDigitalLeft->pinMask)  ? (mapDigitalLeft->buttonMask << 4)  : 0)
-		| ((values & mapDigitalRight->pinMask) ? (mapDigitalRight->buttonMask << 4) : 0)
-	;
-
-	state.buttons = 0
-		| ((values & mapButtonB1->pinMask)  ? mapButtonB1->buttonMask  : 0)
-		| ((values & mapButtonB2->pinMask)  ? mapButtonB2->buttonMask  : 0)
-		| ((values & mapButtonB3->pinMask)  ? mapButtonB3->buttonMask  : 0)
-		| ((values & mapButtonB4->pinMask)  ? mapButtonB4->buttonMask  : 0)
-		| ((values & mapButtonL1->pinMask)  ? mapButtonL1->buttonMask  : 0)
-		| ((values & mapButtonR1->pinMask)  ? mapButtonR1->buttonMask  : 0)
-		| ((values & mapButtonL2->pinMask)  ? mapButtonL2->buttonMask  : 0)
-		| ((values & mapButtonR2->pinMask)  ? mapButtonR2->buttonMask  : 0)
-		| ((values & mapButtonS1->pinMask)  ? mapButtonS1->buttonMask  : 0)
-		| ((values & mapButtonS2->pinMask)  ? mapButtonS2->buttonMask  : 0)
-		| ((values & mapButtonL3->pinMask)  ? mapButtonL3->buttonMask  : 0)
-		| ((values & mapButtonR3->pinMask)  ? mapButtonR3->buttonMask  : 0)
-		| ((values & mapButtonA1->pinMask)  ? mapButtonA1->buttonMask  : 0)
-		| ((values & mapButtonA2->pinMask)  ? mapButtonA2->buttonMask  : 0)
-		| ((values & mapButtonA3->pinMask)  ? mapButtonA3->buttonMask  : 0)
-		| ((values & mapButtonA4->pinMask)  ? mapButtonA4->buttonMask  : 0)
-		| ((values & mapButtonE1->pinMask)  ? mapButtonE1->buttonMask  : 0)
-		| ((values & mapButtonE2->pinMask)  ? mapButtonE2->buttonMask  : 0)
-		| ((values & mapButtonE3->pinMask)  ? mapButtonE3->buttonMask  : 0)
-		| ((values & mapButtonE4->pinMask)  ? mapButtonE4->buttonMask  : 0)
-		| ((values & mapButtonE5->pinMask)  ? mapButtonE5->buttonMask  : 0)
-		| ((values & mapButtonE6->pinMask)  ? mapButtonE6->buttonMask  : 0)
-		| ((values & mapButtonE7->pinMask)  ? mapButtonE7->buttonMask  : 0)
-		| ((values & mapButtonE8->pinMask)  ? mapButtonE8->buttonMask  : 0)
-		| ((values & mapButtonE9->pinMask)  ? mapButtonE9->buttonMask  : 0)
-		| ((values & mapButtonE10->pinMask) ? mapButtonE10->buttonMask : 0)
-		| ((values & mapButtonE11->pinMask) ? mapButtonE11->buttonMask : 0)
-		| ((values & mapButtonE12->pinMask) ? mapButtonE12->buttonMask : 0)
-	;
+	// Only mappings with pins are in the table (see buildReadTable); a zero-mask mapping could
+	// never contribute, so the OR below equals the old per-mapping chain exactly.
+	uint8_t dpad = 0;
+	uint32_t buttons = 0;
+	for (uint8_t i = 0; i < readTableCount; i++) {
+		const ReadEntry& e = readTable[i];
+		if (values & e.pin) {
+			dpad    |= e.dpad;
+			buttons |= e.buttons;
+		}
+	}
+	state.dpad = dpad;
+	state.buttons = buttons;
 
 	// hold current dpad state regardless of input mode -> output, which is determined in process()
 	state.dpadOriginal = state.dpad;

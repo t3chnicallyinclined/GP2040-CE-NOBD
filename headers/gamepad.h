@@ -236,6 +236,14 @@ private:
 	HotkeyEntry hotkeys[16];
 	GamepadHotkey lastAction = HOTKEY_NONE;
 
+	// read()'s pin -> dpad/buttons map, compacted to the mappings that actually have pins. A
+	// typical stick maps ~17 of the 36 digital mappings, and every one used to cost a pointer
+	// chase plus a test per loop pass even when its mask was zero. Built at the end of setup().
+	struct ReadEntry { Mask_t pin; uint32_t buttons; uint8_t dpad; };
+	ReadEntry readTable[36];
+	uint8_t readTableCount = 0;
+	void buildReadTable();
+
 	absolute_time_t disableFocusModeTimeout = nil_time;
 };
 
