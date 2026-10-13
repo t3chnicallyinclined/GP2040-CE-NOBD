@@ -96,6 +96,9 @@ message GamepadOptions
     optional uint32 switch2ProJoyCon2RightButtonsColor = 72;
     optional uint32 switch2ProJoyCon2RightAccentColor = 73;
     optional uint32 switch2ProJoyCon2RightStickColor = 74;
+    // NOBD: USB report polling interval in ms (bInterval of the gamepad's interrupt IN
+    // endpoint). 1 = 1000 Hz (default, fastest), 2 = 500 Hz, 4 = 250 Hz, 8 = 125 Hz.
+    optional uint32 usbPollInterval = 75;
 }
 
 message KeyboardMapping

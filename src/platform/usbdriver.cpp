@@ -6,8 +6,10 @@
 #ifndef _USBDRIVER_CPP_
 #define _USBDRIVER_CPP_
 
+#include <string.h>
 #include "tusb.h"
 #include "drivermanager.h"
+#include "storagemanager.h"
 
 static bool usb_mounted;
 static bool usb_suspended;
@@ -91,8 +93,35 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
+// User-selectable polling rate: rewrite bInterval on the interrupt IN endpoints a driver
+// declares at 1 ms (the report endpoints) to the configured interval. Endpoints a driver
+// already runs slower (auth, audio, chatpad, ...) are left alone, and so is web config.
+// Descriptor time only -- nothing here runs on the input path.
+static uint8_t const *apply_poll_interval(uint8_t const *desc) {
+	static uint8_t patched[512];
+	const uint32_t interval = Storage::getInstance().getGamepadOptions().usbPollInterval;
+	if (desc == nullptr || interval <= 1 || DriverManager::getInstance().isConfigMode())
+		return desc;
+
+	const uint16_t total = tu_le16toh(tu_unaligned_read16(desc + 2));
+	if (total > sizeof(patched))
+		return desc;
+	memcpy(patched, desc, total);
+
+	for (uint16_t i = 0; i + 1 < total && patched[i] != 0; i += patched[i]) {
+		uint8_t *d = &patched[i];
+		if (d[1] == TUSB_DESC_ENDPOINT && d[0] >= 7 &&
+		    (d[2] & TUSB_DIR_IN_MASK) &&
+		    (d[3] & 0x03) == TUSB_XFER_INTERRUPT &&
+		    d[6] == 1) {
+			d[6] = (uint8_t)interval;
+		}
+	}
+	return patched;
+}
+
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
-	return DriverManager::getInstance().getDriver()->get_descriptor_configuration_cb(index);
+	return apply_poll_interval(DriverManager::getInstance().getDriver()->get_descriptor_configuration_cb(index));
 }
 
 uint8_t const* tud_descriptor_device_qualifier_cb() {
