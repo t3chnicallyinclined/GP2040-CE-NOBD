@@ -5,7 +5,18 @@
 #include "hardware/sync.h"    // save_and_disable_interrupts / restore_interrupts
 #include "hardware/timer.h"   // hardware_alarm_* + time
 #include "hardware/structs/io_bank0.h"
-#include "hardware/regs/m0plus.h"   // NVIC ISPR, written inline (see armNearest)
+// NVIC ISPR, written inline (see armNearest). Same register on both cores, different header.
+#if PICO_RP2040
+#include "hardware/regs/m0plus.h"
+#define DOORBELL_NVIC_ISPR_OFFSET M0PLUS_NVIC_ISPR_OFFSET
+#else
+#include "hardware/regs/m33.h"
+#define DOORBELL_NVIC_ISPR_OFFSET M33_NVIC_ISPR0_OFFSET
+#endif
+// RP2350 has two timers; timer_hw / hardware_alarm_* are TIMER0, so its alarm IRQs are TIMER0_IRQ_n.
+#if !PICO_RP2040
+#define TIMER_IRQ_0 TIMER0_IRQ_0
+#endif
 #include "pico/time.h"        // to_ms_since_boot / get_absolute_time / from_us_since_boot
 #include "latency_probe.h"
 
@@ -179,7 +190,7 @@ inline void __not_in_flash_func(armNearest)() {
         s_alarmArmed = false;
         // NVIC set-pending, written inline: the SDK's irq_set_pending() is flash-resident, and
         // this is precisely the recovery path that must not stall on an XIP miss.
-        *(volatile uint32_t*)(PPB_BASE + M0PLUS_NVIC_ISPR_OFFSET) =
+        *(volatile uint32_t*)(PPB_BASE + DOORBELL_NVIC_ISPR_OFFSET) =
             1u << ((uint)(TIMER_IRQ_0 + s_alarm) & 0x1Fu);
     }
 }
