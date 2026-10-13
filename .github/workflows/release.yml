@@ -88,7 +88,7 @@ jobs:
       - name: Setup cmake
         uses: jwlawson/actions-setup-cmake@v2
         with:
-          cmake-version: "3.17.x"
+          cmake-version: "3.31.x"
 
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -96,8 +96,21 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Setup SDK pipeline
-        uses: Fortinbra/RaspberryPiPicoBuild@v7
+      # Same toolchain + SDK as cmake.yml. CMakeLists requires pico-sdk 2.3.1 since the
+      # upstream sync (v0.7.12-112); the Fortinbra pipeline action pinned an older SDK.
+      - name: arm-none-eabi-gcc GNU Arm Embedded Toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+
+      - name: Checkout pico-sdk/2.3.1
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: 2.3.1
+          path: pico-sdk
+
+      - name: Checkout pico-sdk submodules
+        working-directory: ${{github.workspace}}/pico-sdk
+        run: git submodule update --init
 
       - name: Download web artifact
         uses: actions/download-artifact@v8.0.1
