@@ -181,4 +181,8 @@ private:
     void sendBlockReadResponse(uint16_t blockNum, uint32_t locWord, uint8_t port, MapleBus& bus);
     void sendAckResponse(uint8_t port, MapleBus& bus);
     void sendFileErrorResponse(uint32_t errorCode, uint8_t port, MapleBus& bus);
+    void sendShortResponse(int8_t command, const uint32_t* payloadWire, uint numWords, uint8_t port, MapleBus& bus);
+    void sendExtInfoResponse(uint8_t port, MapleBus& bus);
+    // LCD / timer commands (the two advertised functions that are not storage)
+    bool handleNonStorageFunction(int8_t cmd, uint32_t fcWire, uint payloadWords, uint8_t port, MapleBus& bus);
 };

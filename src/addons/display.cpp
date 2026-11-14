@@ -246,7 +246,7 @@ void DisplayAddon::process() {
             } else if (!s1Held && s1HoldStart != 0) {
                 // S1 released — short press (<3s) cycles diag pages when diagnostics on
                 if (!s1Toggled && dc->enableDiagnostics) {
-                    dc->diagPage = (dc->diagPage + 1) % 3;
+                    dc->diagPage = (dc->diagPage + 1) % 2;
                 }
                 s1HoldStart = 0;
             }

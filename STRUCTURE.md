@@ -35,7 +35,6 @@ src/
   ui/               # Core1 presentation, off the input path
     display/          # SSD1306 + screens/elements/fonts
     leds/             # animationstation + player/board LEDs
-  net/              # ethernet / W6100 support consumed by reflect/lan
   hal/              # board seam: i2c/spi/flash/gpio interfaces
 lib/     configs/     # UNCHANGED (vendored deps + board data)
 ```

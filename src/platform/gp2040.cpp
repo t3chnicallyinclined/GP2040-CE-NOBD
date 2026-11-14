@@ -216,12 +216,6 @@ void GP2040::initializeStandardGpio() {
 	    gpOpts.dreamcastPinA < NUM_BANK0_GPIOS &&
 	    gpOpts.dreamcastPinB < NUM_BANK0_GPIOS) {
 		reservedPins |= (Mask_t{1} << gpOpts.dreamcastPinA) | (Mask_t{1} << gpOpts.dreamcastPinB);
-		if (gpOpts.dreamcastP2PinA < NUM_BANK0_GPIOS)
-			reservedPins |= (Mask_t{1} << gpOpts.dreamcastP2PinA);
-		if (gpOpts.dreamcastP2PinB < NUM_BANK0_GPIOS)
-			reservedPins |= (Mask_t{1} << gpOpts.dreamcastP2PinB);
-		if (gpOpts.dreamcastUartRxPin < NUM_BANK0_GPIOS)
-			reservedPins |= (Mask_t{1} << gpOpts.dreamcastUartRxPin);
 	}
 
 	for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++)
@@ -390,24 +384,6 @@ void GP2040::run() {
 	DreamcastDriver * dcDriver = DriverManager::getInstance().getDCDriver();
 	bool dcMode = (dcDriver != nullptr);
 
-	// P2: second Maple Bus + network input (UART or Ethernet)
-	if (dcMode) {
-		const GamepadOptions& opts = Storage::getInstance().getGamepadOptions();
-
-		// Always try W6100 Ethernet first (auto-detect via SPI version read)
-		// If W6100 not present, falls back to UART
-		dcDriver->initEthernet(16, 17, 18, 19, 20);
-
-		// Fall back to UART if Ethernet not detected and UART pin is configured
-		if (!dcDriver->ethernetInitialized && opts.dreamcastUartRxPin < NUM_BANK0_GPIOS) {
-			dcDriver->initUartRx(opts.dreamcastUartRxPin, 1000000);
-		}
-		if (opts.dreamcastP2PinA < NUM_BANK0_GPIOS &&
-		    opts.dreamcastP2PinB < NUM_BANK0_GPIOS) {
-			dcDriver->initP2(opts.dreamcastP2PinA, opts.dreamcastP2PinB);
-		}
-	}
-
 	bool configMode = false;
 	GPDriver * inputDriver = nullptr;
 
@@ -434,8 +410,15 @@ void GP2040::run() {
 	// A4b: a 1 ms wake tick so the WFI event loop can sleep between button edges / USB polls
 	// and still feed the watchdog + run the time-based stages (sync window, turbo) when idle.
 	// The callback does no work -- its only job is to fire the alarm IRQ that wakes __wfi().
+	//
+	// NOT in Dreamcast mode. That loop never sleeps, so it has no use for the tick -- and the tick
+	// breaks VMU saves: a save has Core 1 erase flash with XIP off while this core waits in RAM,
+	// and the SDK's alarm-pool interrupt handler (and this callback) live in flash. A tick landing
+	// inside the erase sent this core into unreadable flash, so every save crashed the stick.
+	// Present from nobd-25 (when this timer arrived) to nobd-27.
 	static repeating_timer_t wakeTimer;
-	add_repeating_timer_us(-1000, [](repeating_timer_t*) -> bool { return true; }, nullptr, &wakeTimer);
+	if (!dcMode)
+		add_repeating_timer_us(-1000, [](repeating_timer_t*) -> bool { return true; }, nullptr, &wakeTimer);
 
 	// A4b (event-driven core): in steady state -- fast path armed (the gate PROVED the ISR owns the
 	// report: output == straight-map, no addon injecting) AND no button edge since the last check --
@@ -471,7 +454,7 @@ void GP2040::run() {
 	while (1) {
 		// A4b: the XInput path sleeps here until a button edge (GPIO doorbell), the 1 ms wake
 		// tick, or a USB IRQ -- CPU asleep between events instead of busy-polling. DC mode
-		// stays flat-out: its Maple ISR + netplay RX poll want every cycle.
+		// stays flat-out: the loop is what samples the buttons for the Maple ISR.
 		if (!dcMode) __wfi();
 
 		// Feed the watchdog first thing every iteration. If the loop never
@@ -503,12 +486,15 @@ void GP2040::run() {
 		}
 
 		if (dcMode) {
-			// NOBD is user-controllable in DC mode too — debouncedGpio feeds
-			// updateCmd9FromGpio() below, so the sync window applies to Maple output.
-			// With NOBD off: raw passthrough (DC polls at 60Hz, so switch bounce
-			// of 1-5ms settles long before the next poll — no debounce needed).
-			if (Storage::getInstance().getGamepadOptions().nobdSyncDelay > 0) {
+			// Input timing is the user's choice in DC mode, same three settings as USB:
+			// NOBD sync window, stock debounce, or neither (raw passthrough). debouncedGpio
+			// feeds updateCmd9FromGpio() below, so whichever is chosen applies to Maple output.
+			// Nothing is forced: with both delays at 0 the pins pass straight through.
+			const GamepadOptions& dcOpts = Storage::getInstance().getGamepadOptions();
+			if (dcOpts.nobdSyncDelay > 0) {
 				syncGpioGetAll();
+			} else if (dcOpts.debounceDelay > 0) {
+				debounceGpioGetAll();
 			} else {
 				gamepad->debouncedGpio = ~gpio_get_all();
 			}
@@ -567,7 +553,6 @@ void GP2040::run() {
 
 		if (dcMode) {
 			dcDriver->process(gamepad);
-			dcDriver->processP2(gamepad);
 		} else {
 			watchdog_hw->scratch[0] = 7; // C0 hang breadcrumb: input driver + USB device task
 			bool processed = inputDriver->process(gamepad);
@@ -584,21 +569,6 @@ void GP2040::run() {
 			// directions as USB (SOCD-once); was debouncedGpio (raw), which skipped SOCD.
 			dcDriver->updateCmd9FromGpio(gamepad->socdCleanedGpio());
 			dcDriver->updateAnalogFromGamepad(gamepad);
-
-			if (dcDriver->ethernetInitialized) {
-				// Send local P1 state to relay server
-				dcDriver->sendLocalState();
-
-				// Forward game state telemetry if ROM patch sends extended CMD9
-				dcDriver->sendTelemetry();
-
-				// Receive from network (server or direct)
-				// If server responds with 8-byte merged state,
-				// netplayActive=true and P1+P2 come from server.
-				// If server stops responding, netplayActive auto-disables
-				// and P1 stays on local GPIO (set above).
-				dcDriver->pollNetwork();
-			}
 		}
 	}
 }

@@ -86,15 +86,6 @@ public:
     volatile uint32_t b2pCount = 0;
     volatile bool b2pPending = false;
 
-    // Game state telemetry from extended CMD9 (ROM patch sends extra words)
-    // ISR extracts after responding — zero added latency to CMD9 response.
-    // Format: raw wire-order words from rxDmaBuf[2..5] (after func code).
-    static constexpr uint8_t TELEMETRY_MAX_WORDS = 4;
-    volatile uint32_t telemetry[TELEMETRY_MAX_WORDS] = {};
-    volatile uint8_t  telemetryWordCount = 0;
-    volatile bool     hasTelemetry = false;
-    uint32_t          telemetryTxCount = 0;  // Total telemetry packets forwarded
-
     bool disableVMU = false;
     bool vmuReady = false;
 
@@ -107,57 +98,30 @@ public:
     uint32_t buttonGpioMask;
     void buildGpioDcMap();
 
-    // Pre-computed CMD9 response lookup table.
-    // Index = compressed GPIO button state (sized to actual button count at init).
-    // W3 = buttons+triggers, W5 = CRC (pre-computed with cached port + constant W4).
+    // Pre-computed CMD9 buttons word (W3 = triggers + buttons), indexed by the compressed
+    // GPIO button state (sized to the actual button count at init).
     uint32_t* cmd9TableW3 = nullptr;
-    uint32_t* cmd9TableW5 = nullptr;        // Restored: CRC pre-computed per button state
     uint32_t  cmd9TableSize = 0;
     uint8_t   cmd9GpioPins[13];
     uint8_t   cmd9NumBits = 0;
-    volatile uint32_t cmd9ReadyW3;
-    volatile uint32_t cmd9ReadyW5;          // Pre-computed CRC for current button state
+    // What the CMD9 ISR sends. The loop fills the idle slot and flips cmd9ActiveSnapshot, so
+    // the ISR always reads buttons, analog and checksum that belong together.
+    struct Cmd9Snapshot {
+        uint32_t buttonsWord;    // word 3: LT, RT, buttons
+        uint32_t analogWord;     // word 4: analog axes
+        uint8_t  bodyChecksum;   // XOR fold of words 2, 3 and 4 (everything except the header)
+    };
+    Cmd9Snapshot cmd9Snapshots[2] = {};
+    volatile uint32_t cmd9ActiveSnapshot = 0;
+    uint32_t cmd9LoopButtonsWord = 0x0000FFFF;   // loop-side copies; the ISR never reads these
+    uint32_t cmd9LoopAnalogWord  = 0x80808080;
+    void publishCmd9Snapshot();
     uint32_t lastFilteredGpio = 0xFFFFFFFF; // Cache for early-return in updateCmd9FromGpio
     void buildCmd9LookupTable();
-    void rebuildCmd9LookupTableForPort();   // Rebuild with real port after CMD1
     void updateCmd9FromGpio(uint32_t filteredGpio);
     void updateAnalogFromGamepad(Gamepad* gamepad);
 
-    // Network input — UART (WiFi bridge) or Ethernet (W6100)
-    void initUartRx(uint pin, uint baud);
-    void initEthernet(uint pin_miso, uint pin_cs, uint pin_sclk, uint pin_mosi, uint pin_rst);
-    void pollUartRx();
-    void pollEthernet();
-    void sendLocalState();  // TX local P1 buttons to relay server
-    void sendTelemetry();   // TX game state telemetry from extended CMD9
-    void pollNetwork();     // Calls whichever transport is active
-    void updateCmd9FromNetwork(uint32_t w3);
-    bool ethernetInitialized = false;
-    bool netplayActive = false;    // True only when server is responding
-    uint8_t ethernetChipVersion = 0;
-    uint8_t serverIp[4] = {0};     // Relay server IP (0 = not configured)
-    uint16_t serverPort = 4977;    // Relay server port
-    PIO      uartRxPio = nullptr;
-    uint     uartRxSm = 0;
-    uint     uartRxSmOffset = 0;
-    uint32_t cachedCrcXorConst = 0;
-    bool     uartRxInitialized = false;
-    uint8_t  uartFramePos = 0;      // 0=waiting for sync, 1-4=data bytes
-    uint8_t  uartFrameBuf[4];       // W3 accumulator
-    uint32_t lastNetW3 = 0;         // Latched network state (persists like held GPIO)
-    uint32_t lastNetTimestamp = 0;   // When last UART frame arrived (us)
-    bool     hasNetState = false;    // True when network state is active
-
-    // Network diagnostics
-    uint32_t netFrameCount = 0;      // Total UART frames received
-    uint32_t netBadSync = 0;         // Bytes discarded before 0xAA sync
-    uint32_t netApplyCount = 0;      // Times updateCmd9FromNetwork called
-    uint32_t netLastW3 = 0xFFFFFFFF; // Last W3 sent to cmd9Ready (for display)
-    uint32_t netFrameArrivalPrev = 0; // Previous frame arrival time
-    uint32_t netIntervalMin = 0xFFFFFFFF;
-    uint32_t netIntervalMax = 0;
-    uint32_t netIntervalLast = 0;
-    uint8_t  diagPage = 0;           // 0=maple, 1=network, 2=state
+    uint8_t  diagPage = 0;           // 0=maple, 1=state
 
     // Cached port from CMD1 — never changes after initial handshake.
     // Used to pre-compute all packet headers and CRCs.
@@ -179,7 +143,6 @@ public:
 
     // Rebuild all static packet headers+CRCs after port is known from CMD1.
     void rebuildAllPacketsForPort(uint8_t port);
-    void rebuildAllPacketsForPortP2(uint8_t port);
 
     // ISR command dispatch — handles ALL Maple Bus commands from ISR context.
     // Registered via bus.enableIsrDispatch() at init.
@@ -187,24 +150,6 @@ public:
 
     // ISR VMU sub-dispatch
     void isrHandleVmuCommand(int8_t cmd, uint32_t hdr, uint8_t port, MapleBus* bus);
-
-    // P2: second Maple Bus for remote player (network-driven)
-    MapleBus busP2;
-    bool p2Enabled = false;
-    bool p2PortKnown = false;
-    uint8_t p2CachedPort = 0;
-    volatile uint32_t p2Cmd9ReadyW3 = 0x0000FFFF;
-    volatile uint32_t p2Cmd9ReadyW5 = 0;
-    uint32_t p2CachedCrcXorConst = 0;
-    uint32_t p2ControllerPacketBuf[6];
-    uint32_t p2InfoPacketBuf[31];
-    uint32_t p2ExtInfoBuf[51];
-    uint32_t p2AckPacketBuf[3];
-    uint32_t p2ResendPacketBuf[3];
-    uint32_t p2UnknownCmdBuf[3];
-
-    bool initP2(uint pin_a, uint pin_b);
-    void processP2(Gamepad* gamepad);
 
 private:
     bool connected;
@@ -215,12 +160,6 @@ private:
     void buildACKPacket();
     void buildResendPacket();
     void buildUnknownCmdPacket();
-    void buildInfoPacketP2();
-    void buildExtInfoPacketP2();
-    void buildControllerPacketP2();
-    void buildACKPacketP2();
-    void buildResendPacketP2();
-    void buildUnknownCmdPacketP2();
 
     void waitTxFlushRx();
     uint16_t mapButtonsToDC(uint32_t gpButtons, uint8_t dpad);

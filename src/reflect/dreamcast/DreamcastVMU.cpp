@@ -551,8 +551,12 @@ void DreamcastVMU::doFlashWrite() {
     // Erase and reprogram. The Pico SDK's flash functions handle multicore safety
     // internally — Core 0 is briefly paused in its RAM-resident interrupt handler
     // while XIP is disabled, then automatically resumed when flash op completes.
+    // Core 1's own interrupts are held off too, for the same reason Core 0's are: no handler
+    // on either core may run from flash while it is switched off.
+    const uint32_t irqState = save_and_disable_interrupts();
     flash_range_erase(sectorStart, FLASH_SECTOR_SIZE);
     flash_range_program(sectorStart, sectorBuffer, FLASH_SECTOR_SIZE);
+    restore_interrupts(irqState);
 }
 
 
@@ -638,6 +642,98 @@ void __no_inline_not_in_flash_func(DreamcastVMU::sendFileErrorResponse)(uint32_t
     bus.sendPacket(pkt, 4);
 }
 
+// Short reply: a command plus up to three payload words (already in wire order).
+void __no_inline_not_in_flash_func(DreamcastVMU::sendShortResponse)(int8_t command, const uint32_t* payloadWire, uint numWords, uint8_t port, MapleBus& bus) {
+    static uint32_t pkt[6];  // bitpairs + header + up to 3 payload + CRC
+    if (numWords > 3) numWords = 3;
+    memset(pkt, 0, sizeof(pkt));
+
+    uint8_t origin = (MAPLE_SUB0_ADDR & MAPLE_PERIPH_MASK) | port;
+    uint8_t dest = (MAPLE_DC_ADDR & MAPLE_PERIPH_MASK) | port;
+
+    pkt[0] = MapleBus::calcBitPairs((3 + numWords) * sizeof(uint32_t));
+    pkt[1] = maple_make_header(numWords, origin, dest, command);
+    for (uint i = 0; i < numWords; i++) pkt[2 + i] = payloadWire[i];
+    pkt[2 + numWords] = MapleBus::calcCRC(&pkt[1], 1 + numWords);
+    bus.sendPacket(pkt, 3 + numWords);
+}
+
+// CMD2 (all status): the 28 device-info words plus 20 words of free-form text, left empty.
+void __no_inline_not_in_flash_func(DreamcastVMU::sendExtInfoResponse)(uint8_t port, MapleBus& bus) {
+    static uint32_t pkt[51];  // bitpairs + header + 48 payload + CRC
+    memset(pkt, 0, sizeof(pkt));
+
+    uint8_t origin = (MAPLE_SUB0_ADDR & MAPLE_PERIPH_MASK) | port;
+    uint8_t dest = (MAPLE_DC_ADDR & MAPLE_PERIPH_MASK) | port;
+
+    pkt[0] = MapleBus::calcBitPairs(sizeof(pkt));
+    pkt[1] = maple_make_header(48, origin, dest, MAPLE_CMD_RESPOND_ALL_STATUS);
+    memcpy(&pkt[2], &vmuInfoBuf[2], 28 * sizeof(uint32_t));
+    pkt[50] = MapleBus::calcCRC(&pkt[1], 49);
+    bus.sendPacket(pkt, 51);
+}
+
+// The VMU advertises three functions: storage, LCD and timer (clock + buzzer). Storage is
+// handled by the main switch. This answers the LCD and timer commands the way a VMU does,
+// with the same replies MaplePad / DreamPicoPort give, instead of a file error or silence.
+// There is no screen, clock or buzzer behind them: writes are accepted and dropped, and the
+// clock always reads 1999-09-09 00:00:00. Returns true if a reply was sent.
+bool __no_inline_not_in_flash_func(DreamcastVMU::handleNonStorageFunction)(int8_t cmd, uint32_t fcWire, uint payloadWords, uint8_t port, MapleBus& bus) {
+    const uint32_t lcdWire   = maple_host_to_wire(MAPLE_FUNC_LCD);
+    const uint32_t timerWire = maple_host_to_wire(MAPLE_FUNC_TIMER);
+    uint32_t reply[3];
+    reply[0] = fcWire;
+
+    if (fcWire == lcdWire) {
+        switch (cmd) {
+            case MAPLE_CMD_GET_MEDIA_INFO:
+                // 48x32 dots, 1 bit per dot
+                reply[1] = maple_host_to_wire(((uint32_t)(48 - 1) << 24) | ((uint32_t)(32 - 1) << 16) | 0x1002);
+                sendShortResponse(MAPLE_CMD_RESPOND_DATA_XFER, reply, 2, port, bus);
+                return true;
+            case MAPLE_CMD_BLOCK_WRITE:
+                if (payloadWords <= 2) return false;
+                sendAckResponse(port, bus);
+                return true;
+            case MAPLE_CMD_SET_CONDITION:
+                reply[1] = 0;
+                sendShortResponse(MAPLE_CMD_RESPOND_DATA_XFER, reply, 2, port, bus);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    if (fcWire == timerWire) {
+        switch (cmd) {
+            case MAPLE_CMD_BLOCK_WRITE:      // set the clock
+                if (payloadWords < 4) return false;
+                sendAckResponse(port, bus);
+                return true;
+            case MAPLE_CMD_BLOCK_READ:       // read the clock
+                if (payloadWords < 2) return false;
+                reply[1] = maple_host_to_wire(((uint32_t)1999 << 16) | (9u << 8) | 9u);
+                reply[2] = maple_host_to_wire(3u);   // 00:00:00, Thursday
+                sendShortResponse(MAPLE_CMD_RESPOND_DATA_XFER, reply, 3, port, bus);
+                return true;
+            case MAPLE_CMD_GET_CONDITION:    // VMU buttons: none pressed
+                reply[1] = maple_host_to_wire(0xFF000000u);
+                sendShortResponse(MAPLE_CMD_RESPOND_DATA_XFER, reply, 2, port, bus);
+                return true;
+            case MAPLE_CMD_SET_CONDITION:    // buzzer
+                if (payloadWords < 2) return false;
+                sendAckResponse(port, bus);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // A function this device does not have at all.
+    sendShortResponse(MAPLE_CMD_RESPOND_FUNC_UNSUP, nullptr, 0, port, bus);
+    return true;
+}
+
 // ============================================================
 // Main command handler (wire-order packet parsing)
 // ============================================================
@@ -657,11 +753,32 @@ bool __no_inline_not_in_flash_func(DreamcastVMU::handleCommand)(const uint8_t* p
     const uint32_t* payload = (const uint32_t*)rawPayload;
     uint payloadWords = rawPayloadLen / sizeof(uint32_t);
 
+    // Commands that carry a function code: anything not addressed to storage (LCD, timer, or a
+    // function we do not have) is answered here. Storage falls through to the switch below.
+    if (cmd == MAPLE_CMD_GET_CONDITION || cmd == MAPLE_CMD_GET_MEDIA_INFO ||
+        cmd == MAPLE_CMD_BLOCK_READ || cmd == MAPLE_CMD_BLOCK_WRITE ||
+        cmd == MAPLE_CMD_SET_CONDITION) {
+        const uint32_t fc = (payloadWords >= 1) ? payload[0] : 0;
+        if (payloadWords >= 1 && fc != MAPLE_FUNC_MEMORY_CARD_WIRE) {
+            if (diag) debugVmuLastFuncCode = fc;
+            if (handleNonStorageFunction(cmd, fc, payloadWords, port, bus)) {
+                logCommand((uint8_t)cmd, MAPLE_CMD_RESPOND_DATA_XFER, fc, 0, 0xFFFF, 0xFF, payloadWords, rawPayload, rawPayloadLen);
+                if (diag) debugVmuTxCount++;
+                return true;
+            }
+        }
+    }
+
     switch (cmd) {
         case MAPLE_CMD_DEVICE_REQUEST:
-        case MAPLE_CMD_ALL_STATUS_REQUEST:
             logCommand(cmd, MAPLE_CMD_RESPOND_DEVICE_STATUS, 0, 0, 0xFFFF, 0xFF, payloadWords);
             sendInfoResponse(port, bus);
+            if (diag) debugVmuTxCount++;
+            return true;
+
+        case MAPLE_CMD_ALL_STATUS_REQUEST:
+            logCommand(cmd, MAPLE_CMD_RESPOND_ALL_STATUS, 0, 0, 0xFFFF, 0xFF, payloadWords);
+            sendExtInfoResponse(port, bus);
             if (diag) debugVmuTxCount++;
             return true;
 
@@ -848,16 +965,25 @@ bool __no_inline_not_in_flash_func(DreamcastVMU::handleCommand)(const uint8_t* p
             memcpy(pendingWriteData, writeBuffer, VMU_BYTES_PER_BLOCK);
             pendingWriteBlockNum = blockNum;
             __dmb();
+            // Interrupts off on this core for the wait. "Spinning in RAM" is not enough on its
+            // own: an interrupt whose handler lives in flash (the SDK alarm pool, for one) would
+            // run this core straight into flash that Core 1 has switched off. Nothing is lost by
+            // masking: the Maple receive interrupt is already disabled while the loop handles a
+            // VMU command, and pending edges are taken as soon as interrupts come back.
+            const uint32_t irqState = save_and_disable_interrupts();
             pendingFlashWrite = true;
             // Spin in RAM until Core 1 clears the flag
             while (pendingFlashWrite) {
                 __dmb();
             }
+            restore_interrupts(irqState);
             return true;
         }
 
         default:
-            // Unknown command — don't respond
+            // Unknown command — don't respond, but leave a trace of what was asked.
+            logCommand((uint8_t)cmd, (uint8_t)MAPLE_CMD_NO_RESPONSE, (payloadWords >= 1) ? payload[0] : 0,
+                       0, 0xFFFF, 0xFF, payloadWords, rawPayload, rawPayloadLen);
             return false;
     }
 }

@@ -5,15 +5,14 @@
 #include "pico/time.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
-#include "uart_rx.pio.h"
-#include "net/w6100.h"
-extern "C" {
-#include "wizchip_conf.h"
-#include "w6100.h"
-}
 
 // Driver instances indexed by PIO1 RX SM number (matches irqBusInstances in maple_bus.cpp).
 static DreamcastDriver* irqDriverInstances[4] = {};
+
+// The Maple checksum is the XOR of every byte in the packet: fold a word's four bytes into one.
+static inline uint8_t foldToByte(uint32_t w) {
+    return (uint8_t)((w >> 24) ^ (w >> 16) ^ (w >> 8) ^ w);
+}
 
 // ============================================================
 // ISR Command Dispatch — handles ALL Maple Bus commands from ISR
@@ -23,15 +22,13 @@ void __no_inline_not_in_flash_func(DreamcastDriver::isrCommandDispatch)(MapleBus
     DreamcastDriver* drv = irqDriverInstances[bus->getRxSm()];
     if (!drv) return;
 
-    const bool isP2 = (drv->p2Enabled && bus == &drv->busP2);
-
     uint32_t hdr = bus->rxDmaBuf[0];
     int8_t cmd = maple_hdr_command(hdr);
     uint8_t destAddr = maple_hdr_dest(hdr) & MAPLE_PERIPH_MASK;
     uint8_t port = maple_hdr_origin(hdr) & MAPLE_PORT_MASK;
 
-    // Route VMU sub-peripheral commands (P1 only)
-    if (!isP2 && !drv->disableVMU && destAddr == MAPLE_SUB0_ADDR) {
+    // Route VMU sub-peripheral commands
+    if (!drv->disableVMU && destAddr == MAPLE_SUB0_ADDR) {
         if (!drv->vmuReady) return;
         drv->isrHandleVmuCommand(cmd, hdr, port, bus);
         return;
@@ -39,63 +36,32 @@ void __no_inline_not_in_flash_func(DreamcastDriver::isrCommandDispatch)(MapleBus
 
     if (destAddr != MAPLE_CTRL_ADDR) return;
 
-    // P2 has no VMU sub-peripheral
-    uint8_t subPeriphBits = (!isP2 && !drv->disableVMU) ? MAPLE_SUB0_ADDR : 0;
+    uint8_t subPeriphBits = !drv->disableVMU ? MAPLE_SUB0_ADDR : 0;
     uint8_t origin = (MAPLE_CTRL_ADDR & MAPLE_PERIPH_MASK) | subPeriphBits | port;
     uint8_t dest = (MAPLE_DC_ADDR & MAPLE_PERIPH_MASK) | port;
 
-    // Select the right buffers for P1 or P2
-    uint32_t* ctrlBuf = isP2 ? drv->p2ControllerPacketBuf : drv->controllerPacketBuf;
-    uint32_t* infoBuf = isP2 ? drv->p2InfoPacketBuf : drv->infoPacketBuf;
-    uint32_t* extBuf  = isP2 ? drv->p2ExtInfoBuf : drv->extInfoBuf;
-    uint32_t* ackBuf  = isP2 ? drv->p2AckPacketBuf : drv->ackPacketBuf;
-    uint32_t* unkBuf  = isP2 ? drv->p2UnknownCmdBuf : drv->unknownCmdBuf;
+    uint32_t* ctrlBuf = drv->controllerPacketBuf;
+    uint32_t* infoBuf = drv->infoPacketBuf;
+    uint32_t* extBuf  = drv->extInfoBuf;
+    uint32_t* ackBuf  = drv->ackPacketBuf;
+    uint32_t* unkBuf  = drv->unknownCmdBuf;
 
     switch (cmd) {
         case MAPLE_CMD_GET_CONDITION: {
-            // Fastest path — pre-computed lookup table.
-            // If port is known and matches cached, use pre-computed W5 (CRC).
-            // Otherwise compute CRC inline (~5 cycles).
+            // The loop publishes buttons, analog and their checksum as ONE snapshot (see
+            // publishCmd9Snapshot). This ISR is the only writer of words 3-5 of the reply, so
+            // the words on the wire always match the checksum sent with them. The header's
+            // share of the checksum is folded here, so nothing depends on the port and there
+            // is no table to rebuild when the console tells us which port we are on.
+            const Cmd9Snapshot& snap = drv->cmd9Snapshots[drv->cmd9ActiveSnapshot];
             uint32_t w1 = maple_make_header(3, origin, dest, MAPLE_CMD_RESPOND_DATA_XFER);
-            uint32_t w3 = isP2 ? drv->p2Cmd9ReadyW3 : drv->cmd9ReadyW3;
 
             ctrlBuf[1] = w1;
-            ctrlBuf[3] = w3;
-
-            {
-                bool pk = isP2 ? drv->p2PortKnown : drv->portKnown;
-                uint8_t cp = isP2 ? drv->p2CachedPort : drv->cachedPort;
-                if (pk && port == cp) {
-                    ctrlBuf[5] = isP2 ? drv->p2Cmd9ReadyW5 : drv->cmd9ReadyW5;
-                } else {
-                    uint32_t xorAll = w1 ^ ctrlBuf[2] ^ w3 ^ ctrlBuf[4];
-                    uint8_t crc = (xorAll >> 24) ^ (xorAll >> 16) ^ (xorAll >> 8) ^ xorAll;
-                    ctrlBuf[5] = (uint32_t)crc << 24;
-                }
-            }
+            ctrlBuf[3] = snap.buttonsWord;
+            ctrlBuf[4] = snap.analogWord;
+            ctrlBuf[5] = (uint32_t)(uint8_t)(foldToByte(w1) ^ snap.bodyChecksum) << 24;
 
             bus->isrSendFifo(ctrlBuf, 6);
-
-            // Extract game state telemetry from extended CMD9 (P1 only).
-            // ROM patch adds extra words after the function code:
-            //   rxDmaBuf[0] = header (numWords=5 for 4 telemetry words)
-            //   rxDmaBuf[1] = func code (0x01000000, standard)
-            //   rxDmaBuf[2..5] = telemetry (health, timer, meter, match state)
-            //   rxDmaBuf[6] = CRC
-            // Reads happen AFTER response is queued — PIO is physically
-            // transmitting while we read.  Zero added latency.
-            if (!isP2) {
-                uint8_t nw = maple_hdr_numWords(hdr);
-                if (nw > 1) {
-                    uint8_t extra = nw - 1;  // subtract function code word
-                    if (extra > DreamcastDriver::TELEMETRY_MAX_WORDS)
-                        extra = DreamcastDriver::TELEMETRY_MAX_WORDS;
-                    for (uint8_t i = 0; i < extra; i++)
-                        drv->telemetry[i] = bus->rxDmaBuf[2 + i];
-                    drv->telemetryWordCount = extra;
-                    drv->hasTelemetry = true;
-                }
-            }
 
             if (drv->enableDiagnostics) {
                 drv->debugRxCount++;
@@ -130,21 +96,13 @@ void __no_inline_not_in_flash_func(DreamcastDriver::isrCommandDispatch)(MapleBus
         }
 
         case MAPLE_CMD_DEVICE_REQUEST: {
-            if (isP2) {
-                if (!drv->p2PortKnown || port != drv->p2CachedPort) {
-                    drv->p2CachedPort = port;
-                    drv->p2PortKnown = true;
-                    drv->rebuildAllPacketsForPortP2(port);
-                }
-            } else {
-                if (!drv->portKnown || port != drv->cachedPort) {
-                    drv->cachedPort = port;
-                    drv->portKnown = true;
-                    drv->rebuildAllPacketsForPort(port);
-                }
+            if (!drv->portKnown || port != drv->cachedPort) {
+                drv->cachedPort = port;
+                drv->portKnown = true;
+                drv->rebuildAllPacketsForPort(port);
             }
             bus->isrSendDma(infoBuf, 31);
-            if (!isP2) drv->vmuReady = true;
+            drv->vmuReady = true;
             if (drv->enableDiagnostics) {
                 drv->debugRxCount++;
                 drv->debugCmd1Count++;
@@ -310,27 +268,6 @@ bool DreamcastDriver::init(uint pin_a, uint pin_b) {
     return true;
 }
 
-bool DreamcastDriver::initP2(uint pin_a, uint pin_b) {
-    if (!busP2.init(pin_a, pin_b)) return false;
-
-    buildInfoPacketP2();
-    buildExtInfoPacketP2();
-    buildControllerPacketP2();
-    buildACKPacketP2();
-    buildResendPacketP2();
-    buildUnknownCmdPacketP2();
-
-    // Set analog sticks to center
-    p2ControllerPacketBuf[4] = ((uint32_t)0x80 << 24) | ((uint32_t)0x80 << 16)
-                              | ((uint32_t)0x80 << 8) | 0x80;
-
-    irqDriverInstances[busP2.getRxSm()] = this;
-    busP2.enableIsrDispatch(isrCommandDispatch);
-
-    p2Enabled = true;
-    return true;
-}
-
 // ============================================================
 // GPIO → DC button mapping
 // ============================================================
@@ -393,20 +330,11 @@ void DreamcastDriver::buildCmd9LookupTable() {
     cmd9TableSize = 1u << cmd9NumBits;
 
     if (cmd9TableW3) delete[] cmd9TableW3;
-    if (cmd9TableW5) delete[] cmd9TableW5;
     cmd9TableW3 = new uint32_t[cmd9TableSize];
-    cmd9TableW5 = new uint32_t[cmd9TableSize];
 
-    // Build W3 for every possible button combination.
-    // W5 (CRC) built with default port (0x00). Rebuilt after CMD1 reveals real port.
-    uint8_t subPeriphBits = disableVMU ? 0 : MAPLE_SUB0_ADDR;
-    uint8_t origin = (MAPLE_CTRL_ADDR & MAPLE_PERIPH_MASK) | subPeriphBits;
-    uint8_t dest   = (MAPLE_DC_ADDR & MAPLE_PERIPH_MASK);
-    uint32_t w1 = maple_make_header(3, origin, dest, MAPLE_CMD_RESPOND_DATA_XFER);
-    uint32_t w2 = maple_host_to_wire(MAPLE_FUNC_CONTROLLER);
-    uint32_t w4 = ((uint32_t)0x80 << 24) | ((uint32_t)0x80 << 16)
-                | ((uint32_t)0x80 << 8) | 0x80;
-
+    // Build W3 (triggers + buttons) for every possible button combination. The checksum is
+    // not tabled: it depends on the analog word too, so it is computed when a snapshot is
+    // published.
     for (uint32_t i = 0; i < cmd9TableSize; i++) {
         uint32_t fakeGpio = 0;
         for (uint8_t b = 0; b < cmd9NumBits; b++) {
@@ -422,45 +350,23 @@ void DreamcastDriver::buildCmd9LookupTable() {
                     | ((uint32_t)((dcButtons >> 8) & 0xFF) << 8)
                     | (dcButtons & 0xFF);
 
-        uint32_t xorAll = w1 ^ w2 ^ w3 ^ w4;
-        uint8_t crc = (xorAll >> 24) ^ (xorAll >> 16) ^ (xorAll >> 8) ^ xorAll;
-
         cmd9TableW3[i] = w3;
-        cmd9TableW5[i] = (uint32_t)crc << 24;
     }
 
-    cmd9ReadyW3 = cmd9TableW3[0];
-    cmd9ReadyW5 = cmd9TableW5[0];
+    cmd9LoopButtonsWord = cmd9TableW3[0];
+    publishCmd9Snapshot();
 }
 
-void DreamcastDriver::rebuildCmd9LookupTableForPort() {
-    // Rebuild W5 (CRC) with the real port address after CMD1.
-    // W3 doesn't change — only the header word changes.
-    uint8_t subPeriphBits = disableVMU ? 0 : MAPLE_SUB0_ADDR;
-    uint8_t origin = (MAPLE_CTRL_ADDR & MAPLE_PERIPH_MASK) | subPeriphBits | cachedPort;
-    uint8_t dest   = (MAPLE_DC_ADDR & MAPLE_PERIPH_MASK) | cachedPort;
-    uint32_t w1 = maple_make_header(3, origin, dest, MAPLE_CMD_RESPOND_DATA_XFER);
-    uint32_t w2 = controllerPacketBuf[2];  // funcCode — constant
-    uint32_t w4 = controllerPacketBuf[4];  // analog — current value
-
-    // Cache XOR constant for network input CRC computation
-    cachedCrcXorConst = w1 ^ w2 ^ w4;
-
-    for (uint32_t i = 0; i < cmd9TableSize; i++) {
-        uint32_t w3 = cmd9TableW3[i];
-        uint32_t xorAll = w1 ^ w2 ^ w3 ^ w4;
-        uint8_t crc = (xorAll >> 24) ^ (xorAll >> 16) ^ (xorAll >> 8) ^ xorAll;
-        cmd9TableW5[i] = (uint32_t)crc << 24;
-    }
-
-    // Update ready values
-    uint32_t raw = ~gpio_get_all();
-    uint32_t index = 0;
-    for (uint8_t b = 0; b < cmd9NumBits; b++) {
-        if (raw & (1u << cmd9GpioPins[b])) index |= (1u << b);
-    }
-    cmd9ReadyW3 = cmd9TableW3[index];
-    cmd9ReadyW5 = cmd9TableW5[index];
+// Loop side only. Fill the slot the ISR is NOT reading, then switch the ISR over with a single
+// store. The Maple ISR runs on this same core, so it either sees the old snapshot or the new
+// one, never a mix of the two.
+void __no_inline_not_in_flash_func(DreamcastDriver::publishCmd9Snapshot)() {
+    const uint32_t idle = cmd9ActiveSnapshot ^ 1u;
+    Cmd9Snapshot& slot = cmd9Snapshots[idle];
+    slot.buttonsWord  = cmd9LoopButtonsWord;
+    slot.analogWord   = cmd9LoopAnalogWord;
+    slot.bodyChecksum = foldToByte(controllerPacketBuf[2] ^ cmd9LoopButtonsWord ^ cmd9LoopAnalogWord);
+    cmd9ActiveSnapshot = idle;
 }
 
 void __no_inline_not_in_flash_func(DreamcastDriver::updateCmd9FromGpio)(uint32_t filteredGpio) {
@@ -472,8 +378,8 @@ void __no_inline_not_in_flash_func(DreamcastDriver::updateCmd9FromGpio)(uint32_t
             index |= (1u << b);
         }
     }
-    cmd9ReadyW3 = cmd9TableW3[index];
-    cmd9ReadyW5 = cmd9TableW5[index];
+    cmd9LoopButtonsWord = cmd9TableW3[index];
+    publishCmd9Snapshot();
 
     // Timestamp for button-to-poll latency measurement
     if (enableDiagnostics) {
@@ -487,247 +393,11 @@ void __no_inline_not_in_flash_func(DreamcastDriver::updateAnalogFromGamepad)(Gam
     uint32_t ly32 = (uint32_t)gamepad->state.ly + 0x80;
     uint8_t jx = (uint8_t)(lx32 > 0xFFFF ? 0xFF : (lx32 >> 8));
     uint8_t jy = (uint8_t)(ly32 > 0xFFFF ? 0xFF : (ly32 >> 8));
-    controllerPacketBuf[4] = ((uint32_t)0x80 << 24) | ((uint32_t)0x80 << 16)
-                           | ((uint32_t)jy << 8) | jx;
-}
-
-// ============================================================
-// Network input via PIO UART RX
-// ============================================================
-
-void DreamcastDriver::initUartRx(uint pin, uint baud) {
-    uartRxPio = pio1;
-    uartRxSmOffset = pio_add_program(uartRxPio, &uart_rx_program);
-    uartRxSm = pio_claim_unused_sm(uartRxPio, true);
-    uart_rx_program_init(uartRxPio, uartRxSm, uartRxSmOffset, pin, baud);
-    uartFramePos = 0;
-    uartRxInitialized = true;
-}
-
-void __no_inline_not_in_flash_func(DreamcastDriver::pollUartRx)() {
-    if (!uartRxInitialized) return;
-
-    // Debug: count raw FIFO level to verify PIO is receiving
-    uint fifoLevel = pio_sm_get_rx_fifo_level(uartRxPio, uartRxSm);
-    if (fifoLevel > 0 && enableDiagnostics) {
-        netBadSync += 1000;  // Hacky marker: if we ever see bad>1000, FIFO has data
-    }
-
-    // Parse any new UART bytes from PIO FIFO
-    while (!pio_sm_is_rx_fifo_empty(uartRxPio, uartRxSm)) {
-        uint8_t byte = (uint8_t)(pio_sm_get(uartRxPio, uartRxSm) >> 24);
-        if (uartFramePos == 0) {
-            if (byte == 0xAA) {
-                uartFramePos = 1;
-            } else if (enableDiagnostics) {
-                netBadSync++;
-            }
-            continue;
-        }
-        uartFrameBuf[uartFramePos - 1] = byte;
-        uartFramePos++;
-        if (uartFramePos == 5) {
-            uint32_t w3 = ((uint32_t)uartFrameBuf[0] << 24) |
-                          ((uint32_t)uartFrameBuf[1] << 16) |
-                          ((uint32_t)uartFrameBuf[2] << 8)  |
-                          (uint32_t)uartFrameBuf[3];
-            lastNetW3 = w3;
-            uint32_t now = timer_hw->timerawl;
-
-            if (enableDiagnostics) {
-                netFrameCount++;
-                if (netFrameArrivalPrev != 0) {
-                    uint32_t interval = now - netFrameArrivalPrev;
-                    netIntervalLast = interval;
-                    if (interval < netIntervalMin) netIntervalMin = interval;
-                    if (interval > netIntervalMax) netIntervalMax = interval;
-                }
-                netFrameArrivalPrev = now;
-            }
-
-            lastNetTimestamp = now;
-            hasNetState = true;
-            uartFramePos = 0;
-        }
-    }
-
-    // Re-apply latched network state every loop (like a held GPIO pin).
-    // Timeout after 100ms of no UART frames = sender disconnected.
-    if (hasNetState) {
-        if (timer_hw->timerawl - lastNetTimestamp > 100000) {
-            hasNetState = false;
-        } else {
-            updateCmd9FromNetwork(lastNetW3);
-        }
-    }
-}
-
-void __no_inline_not_in_flash_func(DreamcastDriver::updateCmd9FromNetwork)(uint32_t w3) {
-    p2Cmd9ReadyW3 = w3;
-    if (enableDiagnostics) {
-        netApplyCount++;
-        netLastW3 = w3;
-    }
-    if (p2PortKnown) {
-        uint32_t xorAll = p2CachedCrcXorConst ^ w3;
-        uint8_t crc = (xorAll >> 24) ^ (xorAll >> 16) ^ (xorAll >> 8) ^ xorAll;
-        p2Cmd9ReadyW5 = (uint32_t)crc << 24;
-    }
-}
-
-// ============================================================
-// W6100 Ethernet transport
-// ============================================================
-
-void DreamcastDriver::initEthernet(uint pin_miso, uint pin_cs, uint pin_sclk, uint pin_mosi, uint pin_rst) {
-    // Only proceed if a W6100 is actually detected. w6100_init returns false
-    // (before its blocking DHCP loop) when no chip answers, so Dreamcast mode
-    // works normally on boards without Ethernet instead of freezing at init.
-    if (!w6100_init(pin_miso, pin_cs, pin_sclk, pin_mosi, pin_rst)) {
-        ethernetInitialized = false;
-        return;
-    }
-    ethernetChipVersion = w6100_get_version();
-
-    uint8_t mac[6] = {0x00, 0x08, 0xDC, 0xDC, 0x00, 0x01};
-    uint8_t ip[4] = {192, 168, 1, 100};
-    uint8_t subnet[4] = {255, 255, 255, 0};
-    uint8_t gateway[4] = {192, 168, 1, 1};
-
-    w6100_set_mac(mac);
-    w6100_set_ip(ip, subnet, gateway);
-
-    if (!w6100_udp_open(4977)) {
-        return;
-    }
-
-    // MapleCast server — hardcoded for now, web UI config later
-    serverIp[0] = 192; serverIp[1] = 168; serverIp[2] = 1; serverIp[3] = 63;
-    serverPort = 7100;
-
-    ethernetInitialized = true;
-}
-
-void __no_inline_not_in_flash_func(DreamcastDriver::sendLocalState)() {
-    if (!ethernetInitialized) return;
-    if (serverIp[0] == 0 && serverIp[1] == 0 && serverIp[2] == 0 && serverIp[3] == 0) return;
-
-    // Send P1 physical button state to relay server
-    uint32_t w3 = cmd9ReadyW3;
-    uint8_t data[4];
-    data[0] = (w3 >> 24) & 0xFF;
-    data[1] = (w3 >> 16) & 0xFF;
-    data[2] = (w3 >> 8) & 0xFF;
-    data[3] = w3 & 0xFF;
-    w6100_udp_send(data, 4, serverIp, serverPort);
-
-    // Timeout netplay if server stops responding (2 seconds)
-    if (netplayActive && (timer_hw->timerawl - lastNetTimestamp > 2000000)) {
-        netplayActive = false;
-        hasNetState = false;
-    }
-}
-
-void DreamcastDriver::sendTelemetry() {
-    if (!ethernetInitialized || !hasTelemetry) return;
-    if (serverIp[0] == 0 && serverIp[1] == 0 && serverIp[2] == 0 && serverIp[3] == 0) return;
-
-    // Forward game state telemetry from extended CMD9 to relay server.
-    // Packet format: [0x54 'T'] [wordCount] [telemetry words...]
-    // 0x54 = 'T' header byte — distinguishes from 4-byte button packets.
-    uint8_t wordCount = telemetryWordCount;
-    uint8_t buf[2 + TELEMETRY_MAX_WORDS * 4];
-    buf[0] = 0x54;  // 'T' — telemetry packet marker
-    buf[1] = wordCount;
-    for (uint8_t i = 0; i < wordCount; i++) {
-        uint32_t w = telemetry[i];
-        buf[2 + i*4 + 0] = (w >> 24) & 0xFF;
-        buf[2 + i*4 + 1] = (w >> 16) & 0xFF;
-        buf[2 + i*4 + 2] = (w >> 8) & 0xFF;
-        buf[2 + i*4 + 3] = w & 0xFF;
-    }
-    w6100_udp_send(buf, 2 + wordCount * 4, serverIp, serverPort);
-    hasTelemetry = false;
-    telemetryTxCount++;
-}
-
-void __no_inline_not_in_flash_func(DreamcastDriver::pollEthernet)() {
-    if (!ethernetInitialized) return;
-
-    // Receive merged state from relay server: 8 bytes = P1 W3 (4) + P2 W3 (4)
-    // Or legacy 4-byte P2-only packets (direct mode without server)
-    uint8_t data[8];
-    uint8_t lastData[8] = {0};
-    int lastLen = 0;
-    bool gotPacket = false;
-
-    // Drain all pending, keep latest
-    while (true) {
-        int len = w6100_udp_recv(data, 8, nullptr, nullptr);
-        if (len <= 0) break;
-        memcpy(lastData, data, len);
-        lastLen = len;
-        gotPacket = true;
-        if (enableDiagnostics) netFrameCount++;
-    }
-
-    if (gotPacket) {
-        if (lastLen >= 8) {
-            // 8-byte merged packet from relay server: {P1_W3, P2_W3}
-            // Server responding = netplay is active
-            netplayActive = true;
-
-            uint32_t p1_w3 = ((uint32_t)lastData[0] << 24) |
-                             ((uint32_t)lastData[1] << 16) |
-                             ((uint32_t)lastData[2] << 8)  |
-                             (uint32_t)lastData[3];
-            uint32_t p2_w3 = ((uint32_t)lastData[4] << 24) |
-                             ((uint32_t)lastData[5] << 16) |
-                             ((uint32_t)lastData[6] << 8)  |
-                             (uint32_t)lastData[7];
-
-            // Apply P1 from server (overrides local GPIO for sync)
-            cmd9ReadyW3 = p1_w3;
-            if (portKnown) {
-                uint32_t xorAll = cachedCrcXorConst ^ p1_w3;
-                uint8_t crc = (xorAll >> 24) ^ (xorAll >> 16) ^ (xorAll >> 8) ^ xorAll;
-                cmd9ReadyW5 = (uint32_t)crc << 24;
-            }
-
-            // Apply P2 from server
-            updateCmd9FromNetwork(p2_w3);
-
-            lastNetW3 = p2_w3;
-        } else if (lastLen >= 4) {
-            // 4-byte legacy packet: P2 only (direct mode, no server)
-            uint32_t w3 = ((uint32_t)lastData[0] << 24) |
-                          ((uint32_t)lastData[1] << 16) |
-                          ((uint32_t)lastData[2] << 8)  |
-                          (uint32_t)lastData[3];
-            updateCmd9FromNetwork(w3);
-            lastNetW3 = w3;
-        }
-
-        lastNetTimestamp = timer_hw->timerawl;
-        hasNetState = true;
-    }
-
-    // Re-apply latched state or timeout
-    if (hasNetState) {
-        if (timer_hw->timerawl - lastNetTimestamp > 100000) {
-            hasNetState = false;
-        } else if (!gotPacket) {
-            updateCmd9FromNetwork(lastNetW3);
-        }
-    }
-}
-
-void __no_inline_not_in_flash_func(DreamcastDriver::pollNetwork)() {
-    if (ethernetInitialized) {
-        pollEthernet();
-    } else {
-        pollUartRx();
-    }
+    const uint32_t analogWord = ((uint32_t)0x80 << 24) | ((uint32_t)0x80 << 16)
+                              | ((uint32_t)jy << 8) | jx;
+    if (analogWord == cmd9LoopAnalogWord) return;
+    cmd9LoopAnalogWord = analogWord;
+    publishCmd9Snapshot();
 }
 
 uint16_t __no_inline_not_in_flash_func(DreamcastDriver::mapRawGpioToDC)(
@@ -879,75 +549,6 @@ void DreamcastDriver::buildUnknownCmdPacket() {
 }
 
 // ============================================================
-// P2 Packet Builders — same format, targets p2 buffers, no VMU
-// ============================================================
-
-void DreamcastDriver::buildInfoPacketP2() {
-    memset(p2InfoPacketBuf, 0, sizeof(p2InfoPacketBuf));
-    // Copy P1 info packet as template (same device info)
-    memcpy(p2InfoPacketBuf, infoPacketBuf, sizeof(p2InfoPacketBuf));
-}
-
-void DreamcastDriver::buildExtInfoPacketP2() {
-    memset(p2ExtInfoBuf, 0, sizeof(p2ExtInfoBuf));
-    memcpy(p2ExtInfoBuf, extInfoBuf, sizeof(p2ExtInfoBuf));
-}
-
-void DreamcastDriver::buildControllerPacketP2() {
-    memset(p2ControllerPacketBuf, 0, sizeof(p2ControllerPacketBuf));
-    memcpy(p2ControllerPacketBuf, controllerPacketBuf, sizeof(p2ControllerPacketBuf));
-}
-
-void DreamcastDriver::buildACKPacketP2() {
-    memset(p2AckPacketBuf, 0, sizeof(p2AckPacketBuf));
-    memcpy(p2AckPacketBuf, ackPacketBuf, sizeof(p2AckPacketBuf));
-}
-
-void DreamcastDriver::buildResendPacketP2() {
-    memset(p2ResendPacketBuf, 0, sizeof(p2ResendPacketBuf));
-    memcpy(p2ResendPacketBuf, resendPacketBuf, sizeof(p2ResendPacketBuf));
-}
-
-void DreamcastDriver::buildUnknownCmdPacketP2() {
-    memset(p2UnknownCmdBuf, 0, sizeof(p2UnknownCmdBuf));
-    memcpy(p2UnknownCmdBuf, unknownCmdBuf, sizeof(p2UnknownCmdBuf));
-}
-
-void DreamcastDriver::rebuildAllPacketsForPortP2(uint8_t port) {
-    // P2 has no VMU — no sub-peripheral bits
-    uint8_t origin = (MAPLE_CTRL_ADDR & MAPLE_PERIPH_MASK) | port;
-    uint8_t dest   = (MAPLE_DC_ADDR & MAPLE_PERIPH_MASK) | port;
-
-    p2InfoPacketBuf[1] = maple_make_header(28, origin, dest, MAPLE_CMD_RESPOND_DEVICE_STATUS);
-    p2InfoPacketBuf[30] = MapleBus::calcCRC(&p2InfoPacketBuf[1], 29);
-
-    p2ExtInfoBuf[1] = maple_make_header(48, origin, dest, MAPLE_CMD_RESPOND_ALL_STATUS);
-    p2ExtInfoBuf[50] = MapleBus::calcCRC(&p2ExtInfoBuf[1], 49);
-
-    p2AckPacketBuf[1] = maple_make_header(0, origin, dest, MAPLE_CMD_RESPOND_ACK);
-    p2AckPacketBuf[2] = MapleBus::calcCRC(&p2AckPacketBuf[1], 1);
-
-    p2ResendPacketBuf[1] = maple_make_header(0, origin, dest, MAPLE_CMD_RESPOND_SEND_AGAIN);
-    p2ResendPacketBuf[2] = MapleBus::calcCRC(&p2ResendPacketBuf[1], 1);
-
-    p2UnknownCmdBuf[1] = maple_make_header(0, origin, dest, MAPLE_CMD_RESPOND_UNKNOWN_CMD);
-    p2UnknownCmdBuf[2] = MapleBus::calcCRC(&p2UnknownCmdBuf[1], 1);
-
-    p2ControllerPacketBuf[1] = maple_make_header(3, origin, dest, MAPLE_CMD_RESPOND_DATA_XFER);
-
-    // Cache CRC constant for network input
-    uint32_t w1 = p2ControllerPacketBuf[1];
-    uint32_t w2 = p2ControllerPacketBuf[2];
-    uint32_t w4 = p2ControllerPacketBuf[4];
-    p2CachedCrcXorConst = w1 ^ w2 ^ w4;
-
-    // Compute initial W5 CRC for current W3 (all buttons released)
-    uint32_t xorAll = p2CachedCrcXorConst ^ p2Cmd9ReadyW3;
-    uint8_t crc = (xorAll >> 24) ^ (xorAll >> 16) ^ (xorAll >> 8) ^ xorAll;
-    p2Cmd9ReadyW5 = (uint32_t)crc << 24;
-}
-
-// ============================================================
 // Rebuild all static packets after CMD1 reveals the real port
 // ============================================================
 
@@ -979,9 +580,6 @@ void DreamcastDriver::rebuildAllPacketsForPort(uint8_t port) {
 
     // Controller state header (word 1 — used by ISR for CMD9)
     controllerPacketBuf[1] = maple_make_header(3, origin, dest, MAPLE_CMD_RESPOND_DATA_XFER);
-
-    // Rebuild CMD9 lookup table CRC with real port
-    rebuildCmd9LookupTableForPort();
 }
 
 // ============================================================
@@ -989,25 +587,6 @@ void DreamcastDriver::rebuildAllPacketsForPort(uint8_t port) {
 // ============================================================
 
 void DreamcastDriver::processAux() {
-}
-
-void __no_inline_not_in_flash_func(DreamcastDriver::processP2)(Gamepad* gamepad) {
-    if (!p2Enabled) return;
-
-    // P2 ISR TX cleanup — same as P1 process() but for busP2, no VMU
-    if (busP2.isrTxFired) {
-        busP2.isrTxFired = false;
-        busP2.finishIsrTx();
-        return;
-    }
-
-    if (busP2.isrNvicDisabled) {
-        // CRC fail on P2 — just restart RX
-        const uint8_t* packet = nullptr;
-        uint rxLen = 0;
-        busP2.pollReceive(&packet, &rxLen);
-        return;
-    }
 }
 
 void __no_inline_not_in_flash_func(DreamcastDriver::waitTxFlushRx)() {
@@ -1054,12 +633,15 @@ void __no_inline_not_in_flash_func(DreamcastDriver::process)(Gamepad* gamepad) {
             uint8_t port = maple_hdr_origin(hdrWord) & MAPLE_PORT_MASK;
 
             // VMU commands — route to existing handleCommand
-            if (!disableVMU && destAddr == MAPLE_SUB0_ADDR) {
-                if (vmuReady && vmu.handleCommand(packet, rxLen, port, bus)) {
-                    waitTxFlushRx();
-                }
-                return;
+            if (!disableVMU && destAddr == MAPLE_SUB0_ADDR && vmuReady) {
+                vmu.handleCommand(packet, rxLen, port, bus);
             }
         }
+
+        // pollReceive() stops the receiver when it hands a packet over. Restart it whether or
+        // not the packet was answered: left stopped, the controller was deaf to the console
+        // for up to 5 ms (until the RX timeout), missing controller polls after any VMU
+        // command we stay silent on.
+        if (gotPacket) waitTxFlushRx();
     }
 }
