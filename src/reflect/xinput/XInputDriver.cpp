@@ -311,30 +311,6 @@ static bool xinput_control_complete(uint8_t rhport, tusb_control_request_t const
     return true;
 }
 
-// ALWAYS-ARMED, from the USB IRQ itself (TinyUSB 0.21's xfer_isr hook). The instant the report
-// finishes going out, re-arm the endpoint with the report STILL IN DPRAM, so it is never idle and
-// the ISR fast path's in-place stamp ships on the very next poll -- no queue, no tud_task, no
-// loop pass in between, so a loop stall can no longer cost a poll. The buffer handed back IS the
-// DPRAM, so TinyUSB keeps owning the DATA0/1 toggle; its byte-wise self-copy could revert an edge
-// stamp that lands mid-copy, so restamp() re-applies one if it did. Paced by the host's poll.
-// Anything else (OUT endpoint, not ready, no buffer) returns false and runs xfer_callback below.
-static bool __not_in_flash_func(xinput_xfer_isr)(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
-{
-    (void)result;
-    (void)xferred_bytes;
-    if (ep_addr != endpoint_in || endpoint_in == 0 || !tud_ready())
-        return false;
-    uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);
-    if (dpram == nullptr || !usbd_edpt_claim(rhport, endpoint_in))
-        return false;
-    LatencyProbe::wire();   // T2: this report just shipped on the wire -- closes edge->wire
-    const uint32_t seq = GpioDoorbell::stampSeq();
-    usbd_edpt_xfer(rhport, endpoint_in, dpram, sizeof(XInputReport), true);
-    usbd_edpt_release(rhport, endpoint_in);
-    GpioDoorbell::restamp(seq);
-    return true;
-}
-
 static bool xinput_xfer_callback(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
 {
     (void)rhport;
@@ -344,8 +320,11 @@ static bool xinput_xfer_callback(uint8_t rhport, uint8_t ep_addr, xfer_result_t 
     if (ep_addr == endpoint_out)
         usbd_edpt_xfer(0, endpoint_out, xinput_out_buffer, XINPUT_OUT_SIZE, false);
 
-    // ALWAYS-ARMED fallback: xinput_xfer_isr() normally re-arms from the IRQ; it defers here only
-    // when it could not (not ready / no buffer / claim refused). Same re-arm, from tud_task.
+    // ALWAYS-ARMED: the instant a report finishes going out, re-arm the endpoint with the report
+    // STILL IN DPRAM, so the ISR fast path's in-place stamp ships on the next poll. Done here, in
+    // tud_task, NOT from TinyUSB's xfer_isr hook: nobd-28 re-armed from the USB IRQ, and
+    // usbd_edpt_claim() takes TinyUSB's endpoint mutex -- taken inside the IRQ while the loop held
+    // it, the IRQ waited forever and the watchdog reset the stick (XInput resets on nobd-28).
     else if (ep_addr == endpoint_in && tud_ready()) {
         LatencyProbe::wire();   // T2: this report just shipped on the wire -- closes edge->wire
         uint8_t* dpram = dcd_rp2040_ep_dpram(endpoint_in);
@@ -465,7 +444,7 @@ void XInputDriver::initialize() {
         .open = xinput_open,
         .control_xfer_cb = xinput_device_control_request,
         .xfer_cb = xinput_xfer_callback,
-        .xfer_isr = xinput_xfer_isr,
+        .xfer_isr = NULL,   // never re-arm from the USB IRQ; see xinput_xfer_callback
         .sof = NULL
     };
 
@@ -693,8 +672,8 @@ bool XInputDriver::process(Gamepad * gamepad) {
                 memcpy(xinputReport._reserved, dpram + offsetof(XInputReport, _reserved),
                        sizeof(xinputReport._reserved));
 #endif
-            // TinyUSB 0.21 panics on an xfer to an armed buffer, and xinput_xfer_isr() arms from
-            // the USB IRQ, so only send if the claim actually succeeded.
+            // TinyUSB 0.21 panics on an xfer to an armed buffer, so only send if the claim
+            // actually succeeded.
             if (usbd_edpt_claim(0, endpoint_in)) {
                 usbd_edpt_xfer(0, endpoint_in, (uint8_t *)&xinputReport, sizeof(XInputReport), false);
                 usbd_edpt_release(0, endpoint_in);

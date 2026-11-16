@@ -131,27 +131,6 @@ bool nobd_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t 
     return hidd_control_xfer_cb(rhport, stage, request);
 }
 
-// ALWAYS-ARMED, from the USB IRQ (TinyUSB 0.21's xfer_isr hook) -- the same discipline as
-// XInputDriver. The stock HID class only re-armed when the loop called tud_hid_report(), so after
-// each report the endpoint sat idle until the next loop pass: an ISR stamp on an idle endpoint
-// did not ship until then. Now the endpoint is re-armed with the report still in DPRAM the moment
-// it goes out, so the fast path's stamp is what the host reads on its very next poll. OUT/other
-// endpoints, or anything that can't re-arm here, defer to the stock hidd_xfer_cb.
-bool __not_in_flash_func(nobd_xfer_isr)(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
-    (void)result;
-    (void)xferred_bytes;
-    if (ep_addr != (0x80 | GAMEPAD_ENDPOINT) || !tud_ready())
-        return false;
-    uint8_t* dpram = dcd_rp2040_ep_dpram(ep_addr);
-    if (dpram == nullptr || !usbd_edpt_claim(rhport, ep_addr))
-        return false;
-    const uint32_t seq = GpioDoorbell::stampSeq();
-    usbd_edpt_xfer(rhport, ep_addr, dpram, (uint16_t)sizeof(HIDReport), true);
-    usbd_edpt_release(rhport, ep_addr);
-    GpioDoorbell::restamp(seq);   // the re-arm self-copies byte-wise; re-apply a stamp it reverted
-    return true;
-}
-
 } // namespace
 
 void NOBDHIDDriver::initialize() {
@@ -172,7 +151,7 @@ void NOBDHIDDriver::initialize() {
         .open = hidd_open,
         .control_xfer_cb = nobd_control_xfer_cb,
         .xfer_cb = hidd_xfer_cb,
-        .xfer_isr = nobd_xfer_isr,
+        .xfer_isr = NULL,   // never re-arm from the USB IRQ (endpoint mutex); the loop queues
         .sof = NULL
     };
 }
@@ -213,14 +192,14 @@ bool NOBDHIDDriver::process(Gamepad * gamepad) {
     uint16_t report_size = sizeof(hidReport);
     if (memcmp(last_report, report, report_size) != 0) {
         if (tud_hid_ready()) {
-            // Endpoint idle (first report, or nothing re-armed it): queue normally.
+            // Endpoint idle (the normal case: the stock HID class re-arms only here): queue.
             if (tud_hid_report(0, report, report_size) == true) {
                 GpioDoorbell::restamp(GpioDoorbell::seqAtLastRead());
                 memcpy(last_report, report, report_size);
                 return true;
             }
         } else if (tud_ready() && s_fastDpram != nullptr) {
-            // Endpoint armed (the normal case now): freshen the staged report in place, then
+            // Endpoint still armed (host has not read the last report yet): freshen the staged report in place, then
             // re-apply any ISR stamp newer than the pins this report was built from.
             memcpy(s_fastDpram, report, report_size);
             GpioDoorbell::restamp(GpioDoorbell::seqAtLastRead());
