@@ -14,8 +14,8 @@ REM  built with the host compiler; the firmware itself is built with arm-none-ea
 REM
 REM  Optional overrides:
 REM    PICO_SDK_PATH   set in your environment to use an SDK elsewhere (for example one shared
-REM                    by several checkouts). Default: <repo>\build\_deps\pico_sdk-src,
-REM                    where CMake's FetchContent puts the SDK.
+REM                    by several checkouts). Otherwise the SDK recorded in build\CMakeCache.txt,
+REM                    else <repo>\build\_deps\pico_sdk-src. It must be pico-sdk 2.3.1 or later.
 REM    NOBD_VCVARSALL  full path to vcvarsall.bat, to skip the Visual Studio search.
 REM ============================================================================
 
@@ -23,7 +23,12 @@ set "REPO_ROOT=%~dp0"
 if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 
 REM ---- pico-sdk ---------------------------------------------------------------
+REM Order: PICO_SDK_PATH from the environment; else the SDK this checkout's build cache already
+REM uses (so an existing setup keeps building against the same SDK); else build\_deps.
+if defined PICO_SDK_PATH goto sdk_check
+if exist "%REPO_ROOT%\build\CMakeCache.txt" for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"PICO_SDK_PATH:PATH=" "%REPO_ROOT%\build\CMakeCache.txt"') do set "PICO_SDK_PATH=%%b"
 if not defined PICO_SDK_PATH set "PICO_SDK_PATH=%REPO_ROOT%\build\_deps\pico_sdk-src"
+:sdk_check
 if exist "%PICO_SDK_PATH%\pico_sdk_init.cmake" goto sdk_found
 echo ERROR: no pico-sdk found at "%PICO_SDK_PATH%".
 echo   Clone pico-sdk 2.3.1 with its submodules, then point PICO_SDK_PATH at it:
@@ -32,6 +37,18 @@ echo     set PICO_SDK_PATH=C:\full\path\to\pico-sdk
 echo   The SDK's lib\mbedtls submodule must be at v2.28.8 (see CLAUDE.md).
 exit /b 1
 :sdk_found
+
+REM ---- web config UI ------------------------------------------------------------
+REM The scripts build with SKIP_WEBBUILD=on, which reuses the generated lib\httpd\fsdata.c.
+REM A fresh clone does not have it yet (it is gitignored).
+if exist "%REPO_ROOT%\lib\httpd\fsdata.c" goto web_found
+echo ERROR: lib\httpd\fsdata.c is missing (the generated web config UI).
+echo   Build it once with Node.js and npm installed: configure without -DSKIP_WEBBUILD=on, e.g.
+echo     cmake -B build -G Ninja -DGP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard -DPICO_SDK_PATH="%PICO_SDK_PATH%"
+echo     cmake --build build
+echo   After that the build scripts reuse it.
+exit /b 1
+:web_found
 
 REM ---- offline rebuilds -------------------------------------------------------
 set "FETCH_FLAG="
