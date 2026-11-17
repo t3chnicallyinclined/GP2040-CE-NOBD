@@ -18,13 +18,17 @@ For anything not NOBD-specific (pin mapping, addons, SOCD, display, USB modes, e
 
 ## Architecture — Where NOBD Lives
 
-### Sync Window (`src/gp2040.cpp`)
-- **`syncGpioGetAll()`** (~line 288) — the NOBD algorithm
+### Sync Window (`src/input/core/sync_window.c`)
+- **`sync_window_step()`** — the NOBD algorithm. In USB modes it is driven from the button-edge
+  interrupt in `src/input/gpio_doorbell.cpp`; in Dreamcast mode from `syncGpioGetAll()` in
+  `src/platform/gp2040.cpp`. See `docs/FLOORPLAN.md`.
   - Static state machine: `sync_pending`, `sync_start_us`, `sync_new`
   - Reads raw GPIO directly, writes `gamepad->debouncedGpio`
-  - Releases are always instant (never delayed)
+  - By default a release is delayed by the same amount its press was (`nobdPreserveWidth`), so the
+    held length is unchanged
   - Built-in bounce filtering via `sync_new &= raw_buttons` every cycle
-  - All presses wait the full sync window before committing (no instant fire)
+  - By default two pending attack buttons commit at once (`nobdEagerCommit` = 2); a lone press waits
+    out the window
 
 - **`debounceGpioGetAll()`** (~line 251) — stock GP2040-CE per-pin debounce (unchanged)
 
@@ -123,7 +127,7 @@ This builds RP2040AdvancedBreakoutBoard, Pico, PicoW, Pico2 and copies UF2s to `
 
 **From Claude Code's bash shell** (bash can't run .bat files directly — use full path via PowerShell):
 ```bash
-powershell.exe -Command "cmd.exe /c 'C:\Users\trist\projects\GP2040-CE\build_nobd.bat'" 2>&1
+powershell.exe -Command "cmd.exe /c '<repo>\build_nobd.bat'" 2>&1
 ```
 Note: `cmd.exe /c build_nobd.bat` from bash often fails silently because the working directory isn't propagated. Always use the full absolute path to the batch file.
 
@@ -135,7 +139,7 @@ cd build/_deps/pico_sdk-src/lib/mbedtls && git checkout v2.28.8
 ### Build Single Board (manual)
 ```powershell
 # Set up MSVC environment first via vcvarsall.bat
-set PICO_SDK_PATH=C:\Users\trist\projects\GP2040-CE\build\_deps\pico_sdk-src
+set PICO_SDK_PATH=<repo>\build\_deps\pico_sdk-src
 set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on
 cmake --build build --config Release --parallel

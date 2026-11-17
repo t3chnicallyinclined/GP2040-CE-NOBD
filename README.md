@@ -213,8 +213,6 @@ See [docs/README.md](docs/README.md) — covers how this project was built using
 
 - [Why NOBD — Technical Deep Dive](docs/WHY-NOBD.md)
 - [Dreamcast Wiring Guide](docs/DREAMCAST.md)
-- [VMU Expert Reference](docs/vmu_expert_reference.md)
-- [Dreamcast Maple Bus Reference](docs/dreamcast_maple_expert.md)
 - [Contributing & AI-Assisted Dev Guide](docs/README.md)
 - [Finger Gap Tester](https://github.com/t3chnicallyinclined/finger-gap-tester)
 - [GP2040-CE upstream](https://gp2040-ce.info/)

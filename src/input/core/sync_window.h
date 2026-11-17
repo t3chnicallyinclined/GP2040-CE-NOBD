@@ -110,7 +110,8 @@ void      sync_window_set_commit_at(sync_window_t *s, uint32_t commit_at);
  *
  * Honest cost model: at 60 fps a frame is 16,700 us and the window at most 16,000, so a 40 ms
  * press arriving as 35 ms crosses the same number of frames either way. This buys exactness, not
- * a felt difference. It is off by default for that reason.
+ * a felt difference. The core leaves it off; the firmware's shipped default turns it on
+ * (nobdPreserveWidth in src/platform/config_utils.cpp).
  *
  * Mutually exclusive with release_debounce, which is a different release policy (defer EVERY
  * release by a full window). Asserted, not silently resolved. */

@@ -190,7 +190,6 @@ With diagnostics off (default), the Maple Bus hot path is pure:
 - [DreamPicoPort by OrangeFox86](https://github.com/OrangeFox86/DreamPicoPort) — Alternative implementation, byte order reference
 - [marcus comstedt's Maple Bus page](http://mc.pp.se/dc/maplebus.html) — Protocol reference
 - [Dreamcast Wiki - Maple Bus](https://dreamcast.wiki/Maple_bus) — Protocol documentation
-- [VMU Expert Reference](vmu_expert_reference.md) — Comprehensive VMU filesystem/protocol docs
 
 ---
 
