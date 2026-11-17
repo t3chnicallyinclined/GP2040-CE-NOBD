@@ -117,17 +117,19 @@ Both values are always stored in flash — switching modes preserves the other m
 - ARM GCC toolchain (arm-none-eabi-gcc 14.2)
 - Node.js + npm (for web UI)
 
-### Build All 4 Boards
+### Build release boards
 
 **From a terminal (not from Claude Code's bash shell):**
 ```powershell
-.\build_nobd.bat
+.\build_nobd.bat                 # ARBB, Pico, PicoW, Haute42COSMOX -> release\
+.\build_nobd.bat Pico PicoW      # only these boards
+.\build.bat                      # ARBB only, with test-image options (see its header)
 ```
-This builds RP2040AdvancedBreakoutBoard, Pico, PicoW, Pico2 and copies UF2s to `release/`.
+The scripts find the repo, the Pico SDK and Visual Studio themselves (`build_env.bat`).
 
 **From Claude Code's bash shell** (bash can't run .bat files directly — use full path via PowerShell):
 ```bash
-powershell.exe -Command "cmd.exe /c '<repo>\build_nobd.bat'" 2>&1
+powershell.exe -NoProfile -Command "& '$(cygpath -w "$PWD")\build_nobd.bat'" 2>&1
 ```
 Note: `cmd.exe /c build_nobd.bat` from bash often fails silently because the working directory isn't propagated. Always use the full absolute path to the batch file.
 
@@ -138,8 +140,8 @@ cd build/_deps/pico_sdk-src/lib/mbedtls && git checkout v2.28.8
 
 ### Build Single Board (manual)
 ```powershell
-# Set up MSVC environment first via vcvarsall.bat
-set PICO_SDK_PATH=<repo>\build\_deps\pico_sdk-src
+# build_env.bat does this for you; to do it by hand:
+set PICO_SDK_PATH=<path to your pico-sdk 2.3.1 checkout>
 set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on
 cmake --build build --config Release --parallel

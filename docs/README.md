@@ -95,7 +95,7 @@ The typical workflow for a firmware change:
 1. Describe the problem or feature to Claude
 2. Claude reads the relevant files, proposes changes
 3. Review the changes, approve edits
-4. Claude runs the build (`build_one.bat`)
+4. Claude runs the build (`build.bat`)
 5. Flash the UF2 to hardware, test on real Dreamcast
 6. Report results back to Claude ("CP=8, still cycling")
 7. Claude adjusts approach based on real-world feedback

@@ -64,12 +64,13 @@ so the readout is UART for now.)
 
 ```bash
 cd tools/lag-tester
-export PICO_SDK_PATH=C:/Users/trist/projects/GP2040-CE/build/_deps/pico_sdk-src
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -Dpicotool_DIR=C:/Users/trist/projects/gp2040-te/build/_deps/picotool
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 # -> build/lag_tester.uf2
 ```
+Run the firmware build once first (`build.bat` at the repo root): the SDK and picotool are found in
+`build/_deps` automatically. Use a shell with the MSVC x64 environment. To use a different SDK or
+picotool pass absolute paths: `-DPICO_SDK_PATH=<abs path>` and `-Dpicotool_DIR=<abs path>`.
 
 **Tester board:** a plain Pico (RP2040) or a **Pico 2 W (RP2350)** both work — the MAX3421E is an
 external SPI host, so the MCU is irrelevant, and the 40-pin layout is identical (same wiring). For
