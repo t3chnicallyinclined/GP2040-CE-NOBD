@@ -60,13 +60,16 @@ opens the handle `FILE_FLAG_OVERLAPPED` (WinUSB rejects a sync handle) and uses 
 
 ## Build from source
 
-**Firmware:**
+**Firmware:** run the firmware build once first (`build.bat` at the repo root) so the SDK and
+picotool exist under `build/_deps`; this project finds them there on its own. Use a shell with the
+MSVC x64 environment (a Developer Command Prompt, or one that has run `vcvarsall.bat x64`).
 ```bash
-export PICO_SDK_PATH=C:/Users/trist/projects/GP2040-CE/build/_deps/pico_sdk-src
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -Dpicotool_DIR=C:/Users/trist/projects/gp2040-te/build/_deps/picotool
+cd tools/bulk-probe
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build            # -> build/bulk_probe.uf2
 ```
+To use a different SDK or picotool, pass absolute paths:
+`-DPICO_SDK_PATH=<abs path to pico-sdk 2.3.1> -Dpicotool_DIR=<abs path to a picotool folder>`.
 
 **PC probe** (Developer Command Prompt for VS):
 ```

@@ -64,3 +64,6 @@ dh.pdb
 
 # Language Server config
 .clangd
+
+# Local MCP server wiring (machine-specific paths)
+.mcp.json

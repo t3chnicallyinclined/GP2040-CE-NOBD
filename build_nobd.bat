@@ -1,53 +1,51 @@
 @echo off
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
-cd /d C:\Users\trist\projects\GP2040-CE
+REM ============================================================================
+REM  Release-style build: one UF2 per board, copied into release\.
+REM
+REM    build_nobd.bat                 RP2040AdvancedBreakoutBoard, Pico, PicoW, Haute42COSMOX
+REM    build_nobd.bat Pico PicoW      only the boards named (any folder name under configs\)
+REM
+REM  The CI release (.github/workflows/release.yml) builds ARBB, Pico, PicoW and WaveshareZero;
+REM  to mirror it locally:  build_nobd.bat RP2040AdvancedBreakoutBoard Pico PicoW WaveshareZero
+REM  Haute42 M Lite / M Ultra:  build_cosmox.bat
+REM
+REM  Builds the repo this file is in, from any working directory. SDK and Visual Studio
+REM  are located by build_env.bat. PicoW needs PICO_BOARD=pico_w; every other board uses pico.
+REM  Pico2 (RP2350) is not built: untested on RP2350 hardware, only RP2040 is released.
+REM ============================================================================
+setlocal
+call "%~dp0build_env.bat"
+if errorlevel 1 exit /b 1
+cd /d "%REPO_ROOT%"
+if not exist release mkdir release
 
-REM Use SDK from build dir if it exists, otherwise fetch from git
-if exist "build\_deps\pico_sdk-src" (
-    set PICO_SDK_PATH=C:\Users\trist\projects\GP2040-CE\build\_deps\pico_sdk-src
-    set FETCH_FLAG=-DFETCHCONTENT_FULLY_DISCONNECTED=on
-) else (
-    set PICO_SDK_PATH=
-    set PICO_SDK_FETCH_FROM_GIT=on
-    set PICO_SDK_FETCH_FROM_GIT_TAG=2.3.1
-    set FETCH_FLAG=
-)
+set "BOARDS=%*"
+if not defined BOARDS set "BOARDS=RP2040AdvancedBreakoutBoard Pico PicoW Haute42COSMOX"
 
-echo [1/4] Building RP2040AdvancedBreakoutBoard...
-set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
-set PICO_BOARD=pico
-del build\CMakeCache.txt >nul 2>&1
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard -DPICO_BOARD=pico -DSKIP_WEBBUILD=on %FETCH_FLAG% 2>&1
-cmake --build build --config Release --parallel 2>&1
-for %%f in (build\GP2040-CE-NOBD_*_RP2040AdvancedBreakoutBoard.uf2) do copy "%%f" release\ >nul 2>&1
-echo   Done: RP2040AdvancedBreakoutBoard
-
-echo [2/4] Building Pico...
-set GP2040_BOARDCONFIG=Pico
-set PICO_BOARD=pico
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=Pico -DPICO_BOARD=pico -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on 2>&1
-cmake --build build --config Release --parallel 2>&1
-for %%f in (build\GP2040-CE-NOBD_*_Pico.uf2) do copy "%%f" release\ >nul 2>&1
-echo   Done: Pico
-
-echo [3/4] Building PicoW...
-set GP2040_BOARDCONFIG=PicoW
-set PICO_BOARD=pico_w
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=PicoW -DPICO_BOARD=pico_w -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on 2>&1
-cmake --build build --config Release --parallel 2>&1
-for %%f in (build\GP2040-CE-NOBD_*_PicoW.uf2) do copy "%%f" release\ >nul 2>&1
-echo   Done: PicoW
-
-echo [4/4] Building Haute42COSMOX...
-set GP2040_BOARDCONFIG=Haute42COSMOX
-set PICO_BOARD=pico
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=Haute42COSMOX -DPICO_BOARD=pico -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on 2>&1
-cmake --build build --config Release --parallel 2>&1
-for %%f in (build\GP2040-CE-NOBD_*_Haute42COSMOX.uf2) do copy "%%f" release\ >nul 2>&1
-echo   Done: Haute42COSMOX
-
-REM Pico2 (RP2350) removed — untested on RP2350 hardware, only releasing RP2040 builds
+for %%b in (%BOARDS%) do call :build %%b
 
 echo.
 echo === Release files ===
 dir /b release\GP2040-CE-NOBD_*.uf2
+if defined ANY_FAILED exit /b 1
+exit /b 0
+
+:build
+set "GP2040_BOARDCONFIG=%~1"
+set "PICO_BOARD=pico"
+if /I "%~1"=="PicoW" set "PICO_BOARD=pico_w"
+echo === Building %GP2040_BOARDCONFIG% (%PICO_BOARD%) ===
+REM Fresh cache per board: the board config and PICO_BOARD both feed the toolchain setup.
+del build\CMakeCache.txt >nul 2>&1
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGP2040_BOARDCONFIG=%GP2040_BOARDCONFIG% -DPICO_BOARD=%PICO_BOARD% -DPICO_SDK_PATH="%PICO_SDK_PATH%" -DSKIP_WEBBUILD=on %FETCH_FLAG%
+if errorlevel 1 goto build_failed
+cmake --build build --config Release --parallel
+if errorlevel 1 goto build_failed
+for %%f in (build\GP2040-CE-NOBD_*_%GP2040_BOARDCONFIG%.uf2) do copy "%%f" release\ >nul
+echo   Done: %GP2040_BOARDCONFIG%
+exit /b 0
+
+:build_failed
+echo   FAILED: %GP2040_BOARDCONFIG%
+set ANY_FAILED=1
+exit /b 1

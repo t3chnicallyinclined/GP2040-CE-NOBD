@@ -11,7 +11,7 @@ that *prove* this C live in [`test/reference/input/`](../../../test/reference/in
 prove the core after ANY change to a `.c`/`.py` pair:
 
 ```
-cd test/reference/input && python dst.py     # 17 tiers incl. C<->spec parity — must PASS
+cd test/reference/input && python dst.py     # 15 tiers covering invariants I1-I17, incl. C<->spec parity — must PASS
 ```
 
 Each stage's C has a matching `.py` spec; keep the two in lockstep — `dst.py` tiers

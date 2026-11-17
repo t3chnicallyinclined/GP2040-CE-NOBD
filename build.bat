@@ -1,9 +1,6 @@
 @echo off
 REM ============================================================================
-REM  Canonical build for gp2040-te (THIS repo).
-REM
-REM  The legacy build_*.bat scripts build the GP2040-CE *fallback* repo, not this
-REM  one -- use THIS script to build gp2040-te.
+REM  Build the NOBD firmware for the RP2040 Advanced Breakout Board.
 REM
 REM    build.bat            production image (latency instrumentation compiled out)
 REM    build.bat selftest   self-test image: measure + the firmware drives its own button
@@ -15,14 +12,20 @@ REM    build.bat nobdhid selftest   same, plus the self-driving stimulus
 REM    build.bat measure    measurement image (TE_LATENCY_MEASURE=ON: on-die probe
 REM                         + report edge-time stamp + OLED D/W HUD). See docs/latency-testing/.
 REM
+REM  Other boards, or several at once: build_nobd.bat (see its header).
+REM
 REM  Notes:
-REM   - The Pico SDK lives in the GP2040-CE build tree (shared); adjust PICO_SDK_PATH if it moves.
+REM   - Builds the repo this file is in, from any working directory.
+REM   - The Pico SDK defaults to <repo>\build\_deps\pico_sdk-src; set PICO_SDK_PATH to use
+REM     another one (see build_env.bat). It is passed to CMake explicitly because CMake
+REM     ignores the environment variable once the build cache has a value.
 REM   - The board MUST be pinned (-DGP2040_BOARDCONFIG) or a reconfigure defaults it to Pico and
 REM     the build breaks on a missing BoardConfig.h.
 REM ============================================================================
 setlocal
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
-cd /d "%~dp0"
+call "%~dp0build_env.bat"
+if errorlevel 1 exit /b 1
+cd /d "%REPO_ROOT%"
 
 set MEASURE=OFF
 set SELFTEST=OFF
@@ -39,12 +42,12 @@ if /I "%~1"=="nobdhid" set NOBDHID=ON
 if /I "%~1"=="nobdhid" set MEASURE=ON
 if /I "%~2"=="selftest" set SELFTEST=ON
 
-set PICO_SDK_PATH=C:\Users\trist\projects\GP2040-CE\build\_deps\pico_sdk-src
 set GP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard
 
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
   -DGP2040_BOARDCONFIG=RP2040AdvancedBreakoutBoard -DPICO_BOARD=pico ^
-  -DSKIP_WEBBUILD=on -DFETCHCONTENT_FULLY_DISCONNECTED=on ^
+  -DPICO_SDK_PATH="%PICO_SDK_PATH%" ^
+  -DSKIP_WEBBUILD=on %FETCH_FLAG% ^
   -DTE_LATENCY_MEASURE=%MEASURE% -DTE_SELFTEST=%SELFTEST% -DTE_SELFTEST_DIAG=%DIAG% ^
   -DNOBD_HID_MODE=%NOBDHID%
 if errorlevel 1 exit /b 1
